@@ -4,6 +4,7 @@ import org.jetbrains.exposed.dao.id.IntIdTable
 import org.jetbrains.exposed.sql.ReferenceOption
 import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.javatime.CurrentDateTime
+import java.math.BigDecimal
 
 object ImportBatches : IntIdTable("import_batches") {
     val filename = varchar("filename", 255)
@@ -26,8 +27,14 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
     val hourlyGross = decimal("hourly_gross_kc",12, 2).nullable()
     val hourlyNet   = decimal("hourly_net_kc",  12, 2).nullable()
 
-    // nový sloupec
     val cashTaken   = decimal("cash_taken_kc",  12, 2).nullable()
+
+    val paid = bool("paid").default(false)
+    val paidAt = datetime("paid_at").nullable()
+
+    val bonus = decimal("bonus_kc", 12, 2).default(BigDecimal.ZERO)
+    val penalty = decimal("penalty_kc", 12, 2).default(BigDecimal.ZERO)
+
 
     init {
         index(true, uniqueIdentifier, batchId)
