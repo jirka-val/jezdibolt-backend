@@ -1,10 +1,8 @@
 ktor:
-    application:
-        modules:
-            - cz.ApplicationKt.module
-    deployment:
-        port: 8080
-jwt:
-  domain: "https://jwt-provider-domain/"
-  audience: "jwt-audience"
-  realm: "ktor sample app"
+  deployment:
+    port: 8080
+    watch:
+      - jezdibolt
+  application:
+    modules:
+      - jezdibolt.ApplicationKt.module

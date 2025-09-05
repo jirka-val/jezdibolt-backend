@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.plugin.serialization)
 }
 
-group = "cz"
+group = "jezdibolt"
 version = "0.0.1"
 
 application {
@@ -12,6 +12,18 @@ application {
 }
 
 dependencies {
+
+    implementation("org.jetbrains.exposed:exposed-core:0.61.0")
+    implementation("org.jetbrains.exposed:exposed-jdbc:0.61.0")
+    implementation("org.jetbrains.exposed:exposed-dao:0.61.0")
+    implementation("org.jetbrains.exposed:exposed-java-time:0.61.0")
+
+    // XLSX
+    implementation("org.apache.poi:poi-ooxml:5.2.5")
+
+    implementation("com.h2database:h2:2.2.224")
+
+
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.swagger)
     implementation(libs.ktor.server.compression)
