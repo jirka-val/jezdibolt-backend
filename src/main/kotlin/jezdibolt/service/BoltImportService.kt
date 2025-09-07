@@ -118,13 +118,19 @@ class BoltImportService {
         val existing = UsersSchema.selectAll().where { UsersSchema.email eq email }.singleOrNull()
         if (existing != null) return existing[UsersSchema.id]
 
+        // defaultni heslo zatim
+        val defaultPassword = "Default123"
+        val hashed = org.mindrot.jbcrypt.BCrypt.hashpw(defaultPassword, org.mindrot.jbcrypt.BCrypt.gensalt())
+
         return UsersSchema.insertAndGetId {
             it[UsersSchema.name] = nameOrNull ?: email.substringBefore("@")
             it[UsersSchema.email] = email
             it[UsersSchema.contact] = contactOrNull ?: ""
             it[UsersSchema.role] = "driver"
+            it[UsersSchema.passwordHash] = hashed
         }
     }
+
 
     private fun org.apache.poi.ss.usermodel.Cell.stringValue(): String =
         when (cellType) {

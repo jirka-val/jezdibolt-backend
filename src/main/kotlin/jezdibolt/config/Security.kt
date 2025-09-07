@@ -7,23 +7,25 @@ import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
 
 fun Application.configureSecurity() {
-    // Please read the jwt property from the config file if you are using EngineMain
-    val jwtAudience = "jwt-audience"
-    val jwtDomain = "https://jwt-provider-domain/"
-    val jwtRealm = "ktor sample app"
-    val jwtSecret = "secret"
-    authentication {
-        jwt {
-            realm = jwtRealm
+    val secret = "super-secret" // TODO: načíst z env/configu
+    val issuer = "jezdibolt"
+    val audience = "jezdibolt-users"
+    val realm = "Access to Jezdibolt"
+
+    install(Authentication) {
+        jwt("auth-jwt") {
+            this.realm = realm
             verifier(
                 JWT
-                    .require(Algorithm.HMAC256(jwtSecret))
-                    .withAudience(jwtAudience)
-                    .withIssuer(jwtDomain)
+                    .require(Algorithm.HMAC256(secret))
+                    .withAudience(audience)
+                    .withIssuer(issuer)
                     .build()
             )
             validate { credential ->
-                if (credential.payload.audience.contains(jwtAudience)) JWTPrincipal(credential.payload) else null
+                val userId = credential.payload.getClaim("userId").asInt()
+                val role = credential.payload.getClaim("role").asString()
+                if (userId != null && role != null) JWTPrincipal(credential.payload) else null
             }
         }
     }

@@ -1,0 +1,100 @@
+✅ Checklist co se musí udělat
+
+1. Uživatelské účty a role
+
+    V tabulce users už máš role → teď musíme definovat: ✅
+
+    owner → vlastník (vidí všechno, spravuje účty, auta, bonusy/pokuty, nájmy, přehledy). ✅
+    admin -> může spravovat auta, bonusy/pokuty, nájmy, přehledy (ale ne uživatele). ✅
+    driver → řidič (vidí jen své výplaty, bonusy/pokuty, dluhy). ✅
+    renter -> nájemce (vidí jen auta, která má půjčená, a kolik dluží). ✅
+
+    případně později manager nebo něco mezi.
+
+
+2. Přihlašování (login)
+
+    Přidat password_hash sloupec do tabulky users.  ✅
+    Vytvořit endpoint POST /login → přijme email + password.    ✅
+    Heslo se ověří přes BCrypt. ✅
+    Po přihlášení vydáme JWT token. ✅
+
+
+3. Autorizace (práva přístupu)
+
+    Middleware/Plugin, který kontroluje JWT.
+    Do JWT uložíme userId a role.
+    Endpointy rozdělíme:
+    owner → může na všechna API (vidí všechny výdělky, spravuje auta, bonusy/pokuty, řidiče).
+    admin → může na všechna API kromě správy uživatelů (vidí všechny výdělky, spravuje auta, bonusy/pokuty, řidiče).
+    driver → může jen GET /me/earnings (vidí svoje výdělky).
+    renter → může jen GET /me/cars (vidí svoje půjčené auta a dluhy).
+
+4. Správa uživatelů
+
+    Jen owner může přidávat nové účty.
+
+    Endpointy:
+
+    POST /users → přidání uživatele (owner only).
+
+    GET /users → seznam uživatelů (owner only).
+
+    PUT /users/{id} → úprava uživatele (owner only).
+
+    DELETE /users/{id} → smazání uživatele (owner only).
+
+
+
+
+5. Sekce ve webu
+
+    Výplaty (earnings) – to už máme.
+
+    Řidiči na nájem – tabulka: řidič ↔ auto, částka nájmu, kolik dluží.
+
+    Auta – evidence všech aut (SPZ, datum STK, pojištění, servis, kdo ho má půjčené).
+
+
+
+
+6. Role-based frontend
+
+    Owner → vidí dashboard všech řidičů, auta, nájmy, bonusy/pokuty, platby.
+
+    Driver → vidí jen:
+
+    svůj profil,
+
+    své týdenní výplaty,
+
+    proč dostal tolik (bonusy, pokuty, hotovost),
+
+    jestli je vyplacený nebo dluží.
+
+
+
+
+💡 Co ještě promyslet
+
+    Registrace: bude jen přes ownera (žádný public signup).
+
+    Bezpečnost: hesla ukládat jen jako hash.
+
+    Token expiry: JWT tokeny na 1 den, refresh tokeny na déle.
+
+    Audit log: volitelné, kdo co změnil (bonus/pokuta).
+
+
+
+
+
+👉 Navrhuju postup:
+
+    Přidáme password_hash do DB a endpoint /login.
+
+    Zavedeme JWT autentizaci a middleware.
+
+    Uděláme endpoints pro správu uživatelů (jen pro ownera).
+
+    Až tohle poběží, pustíme se do aut a nájmu.

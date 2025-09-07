@@ -17,120 +17,113 @@ import java.math.RoundingMode
 
 fun Application.earningsApi() {
     routing {
+        route("/earnings") {
 
-        @Serializable
-        data class BonusRequest(val bonus: String)
+            @Serializable
+            data class BonusRequest(val bonus: String)
 
-        put("/earnings/{id}/bonus") {
-            val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
+            put("{id}/bonus") {
+                val id = call.parameters["id"]?.toIntOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
 
-            val body = call.receive<BonusRequest>()
-            val bonusValue = body.bonus.toBigDecimalOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing or invalid bonus"))
+                val body = call.receive<BonusRequest>()
+                val bonusValue = body.bonus.toBigDecimalOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing or invalid bonus"))
 
-            transaction {
-                BoltEarnings.update({ BoltEarnings.id eq id }) {
-                    it[bonus] = bonusValue
+                transaction {
+                    BoltEarnings.update({ BoltEarnings.id eq id }) {
+                        it[bonus] = bonusValue
+                    }
                 }
+
+                call.respond(HttpStatusCode.OK, mapOf("status" to "bonus updated", "bonus" to bonusValue.toPlainString()))
             }
 
-            call.respond(HttpStatusCode.OK, mapOf("status" to "bonus updated", "bonus" to bonusValue.toPlainString()))
-        }
+            @Serializable
+            data class PenaltyRequest(val penalty: String)
 
+            put("{id}/penalty") {
+                val id = call.parameters["id"]?.toIntOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
 
-        @Serializable
-        data class PenaltyRequest(val penalty: String)
+                val body = call.receive<PenaltyRequest>()
+                val penaltyValue = body.penalty.toBigDecimalOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing or invalid penalty"))
 
-        put("/earnings/{id}/penalty") {
-            val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
-
-            val body = call.receive<PenaltyRequest>()
-            val penaltyValue = body.penalty.toBigDecimalOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing or invalid penalty"))
-
-            transaction {
-                BoltEarnings.update({ BoltEarnings.id eq id }) {
-                    it[penalty] = penaltyValue
+                transaction {
+                    BoltEarnings.update({ BoltEarnings.id eq id }) {
+                        it[penalty] = penaltyValue
+                    }
                 }
+
+                call.respond(HttpStatusCode.OK, mapOf("status" to "penalty updated", "penalty" to penaltyValue.toPlainString()))
             }
 
-            call.respond(
-                HttpStatusCode.OK,
-                mapOf(
-                    "status" to "penalty updated",
-                    "penalty" to penaltyValue.toPlainString()
-                )
-            )
-        }
+            put("{id}/pay") {
+                val id = call.parameters["id"]?.toIntOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid id"))
 
-
-        put("/earnings/{id}/pay") {
-            val id = call.parameters["id"]?.toIntOrNull()
-                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid id"))
-
-            transaction {
-                BoltEarnings.update({ BoltEarnings.id eq id }) {
-                    it[paid] = true
-                    it[paidAt] = CurrentDateTime
+                transaction {
+                    BoltEarnings.update({ BoltEarnings.id eq id }) {
+                        it[paid] = true
+                        it[paidAt] = CurrentDateTime
+                    }
                 }
+
+                call.respond(HttpStatusCode.OK, mapOf("status" to "marked as paid"))
             }
 
-            call.respond(HttpStatusCode.OK, mapOf("status" to "marked as paid"))
-        }
+            get("/imports/{id}") {
+                val batchIdParam = call.parameters["id"]?.toIntOrNull()
+                if (batchIdParam == null) {
+                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid batchId"))
+                    return@get
+                }
 
+                try {
+                    val results = transaction {
+                        (BoltEarnings innerJoin UsersSchema)
+                            .selectAll()
+                            .where { BoltEarnings.batchId eq batchIdParam }
+                            .map { row ->
+                                val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
+                                val grossTotal = row[BoltEarnings.grossTotal] ?: BigDecimal.ZERO
 
-        get("/imports/{id}/earnings") {
-            val batchIdParam = call.parameters["id"]?.toIntOrNull()
-            if (batchIdParam == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid batchId"))
-                return@get
-            }
+                                val hoursWorked = if (hourlyGross > BigDecimal.ZERO) {
+                                    grossTotal.divide(hourlyGross, 2, RoundingMode.HALF_UP).toInt()
+                                } else {
+                                    0
+                                }
 
-            try {
-                val results = transaction {
-                    (BoltEarnings innerJoin UsersSchema)
-                        .selectAll()
-                        .where { BoltEarnings.batchId eq batchIdParam }
-                        .map { row ->
-                            val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
-                            val grossTotal = row[BoltEarnings.grossTotal] ?: BigDecimal.ZERO
+                                val grossPerHour = hourlyGross.toInt()
+                                val payout = PayoutService.calculatePayout(hoursWorked, grossPerHour)
+                                val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
 
-                            val hoursWorked = if (hourlyGross > BigDecimal.ZERO) {
-                                grossTotal.divide(hourlyGross, 2, RoundingMode.HALF_UP).toInt()
-                            } else {
-                                0
+                                val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
+                                val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
+
+                                val settlement = payout - cashTaken + bonus - penalty
+
+                                EarningsDto(
+                                    id = row[BoltEarnings.id].value,
+                                    userName = row[UsersSchema.name],
+                                    email = row[UsersSchema.email],
+                                    hoursWorked = hoursWorked,
+                                    grossPerHour = grossPerHour,
+                                    payout = payout.toPlainString(),
+                                    cashTaken = cashTaken.toPlainString(),
+                                    bonus = bonus.toPlainString(),
+                                    penalty = penalty.toPlainString(),
+                                    settlement = settlement.toPlainString(),
+                                    paid = row[BoltEarnings.paid]
+                                )
                             }
+                    }
 
-                            val grossPerHour = hourlyGross.toInt()
-                            val payout = PayoutService.calculatePayout(hoursWorked, grossPerHour)
-                            val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
-
-                            val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
-                            val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
-
-                            val settlement = payout - cashTaken + bonus - penalty
-
-                            EarningsDto(
-                                id = row[BoltEarnings.id].value,
-                                userName = row[UsersSchema.name],
-                                email = row[UsersSchema.email],
-                                hoursWorked = hoursWorked,
-                                grossPerHour = grossPerHour,
-                                payout = payout.toPlainString(),
-                                cashTaken = cashTaken.toPlainString(),
-                                bonus = bonus.toPlainString(),
-                                penalty = penalty.toPlainString(),
-                                settlement = settlement.toPlainString(),
-                                paid = row[BoltEarnings.paid]
-                            )
-                        }
+                    call.respond(HttpStatusCode.OK, results)
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to fetch earnings data"))
                 }
-
-                call.respond(HttpStatusCode.OK, results)
-            } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to fetch earnings data"))
             }
         }
     }
@@ -150,5 +143,3 @@ data class EarningsDto(
     val settlement: String,
     val paid: Boolean
 )
-
-

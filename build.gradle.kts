@@ -23,6 +23,8 @@ dependencies {
 
     implementation("com.h2database:h2:2.2.224")
 
+    implementation("org.mindrot:jbcrypt:0.4")
+
 
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.swagger)
