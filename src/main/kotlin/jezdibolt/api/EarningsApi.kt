@@ -86,21 +86,29 @@ fun Application.earningsApi() {
                             .selectAll()
                             .where { BoltEarnings.batchId eq batchIdParam }
                             .map { row ->
-                                val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
                                 val grossTotal = row[BoltEarnings.grossTotal] ?: BigDecimal.ZERO
+                                val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
+                                val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
+                                val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
+                                val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
 
+                                // odpracované hodiny (čistě pro info)
                                 val hoursWorked = if (hourlyGross > BigDecimal.ZERO) {
                                     grossTotal.divide(hourlyGross, 2, RoundingMode.HALF_UP).toInt()
                                 } else {
                                     0
                                 }
 
-                                val grossPerHour = hourlyGross.toInt()
-                                val payout = PayoutService.calculatePayout(hoursWorked, grossPerHour)
-                                val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
-
-                                val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
-                                val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
+                                // ✅ použít uložené hodnoty, fallback pro starší importy
+                                val appliedRate = row[BoltEarnings.appliedRate] ?: 0
+                                val payout = row[BoltEarnings.payout] ?: run {
+                                    if (hoursWorked > 0) {
+                                        val rate = PayoutService.getAppliedRate(hoursWorked, hourlyGross.toInt())
+                                        BigDecimal(rate) * BigDecimal(hoursWorked)
+                                    } else {
+                                        BigDecimal.ZERO
+                                    }
+                                }
 
                                 val settlement = payout - cashTaken + bonus - penalty
 
@@ -109,7 +117,7 @@ fun Application.earningsApi() {
                                     userName = row[UsersSchema.name],
                                     email = row[UsersSchema.email],
                                     hoursWorked = hoursWorked,
-                                    grossPerHour = grossPerHour,
+                                    grossPerHour = appliedRate,
                                     payout = payout.toPlainString(),
                                     cashTaken = cashTaken.toPlainString(),
                                     bonus = bonus.toPlainString(),
@@ -122,9 +130,13 @@ fun Application.earningsApi() {
 
                     call.respond(HttpStatusCode.OK, results)
                 } catch (e: Exception) {
-                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to fetch earnings data"))
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        mapOf("error" to "Failed to fetch earnings data")
+                    )
                 }
             }
+
         }
     }
 }

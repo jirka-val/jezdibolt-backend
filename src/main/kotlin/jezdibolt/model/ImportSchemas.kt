@@ -29,6 +29,10 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
 
     val cashTaken   = decimal("cash_taken_kc",  12, 2).nullable()
 
+    val appliedRate = integer("applied_rate").nullable()          // sazba použitá při importu
+    val payout = decimal("payout_kc", 12, 2).nullable()           // výplata vypočtená při importu
+
+
     val paid = bool("paid").default(false)
     val paidAt = datetime("paid_at").nullable()
 

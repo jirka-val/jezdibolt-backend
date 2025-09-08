@@ -43,6 +43,36 @@ object PayoutService {
         }
     }
 
+    fun getAppliedRate(hours: Int, grossPerHour: Int): Int {
+        return transaction {
+            val baseRateRow = PayRates
+                .selectAll()
+                .firstOrNull { row ->
+                    val min = row[PayRates.minGross]
+                    val max = row[PayRates.maxGross]
+                    grossPerHour >= min && (max == null || grossPerHour <= max)
+                }
+
+            var rate = baseRateRow?.get(PayRates.rate) ?: 130
+
+            PayRules.selectAll().forEach { rule ->
+                when (rule[PayRules.type]) {
+                    "min_hours" -> {
+                        if (hours <= rule[PayRules.hours] && rule[PayRules.mode] == "set") {
+                            rate = rule[PayRules.adjustment]
+                        }
+                    }
+                    "bonus_hours" -> {
+                        if (hours >= rule[PayRules.hours] && rule[PayRules.mode] == "add") {
+                            rate += rule[PayRules.adjustment]
+                        }
+                    }
+                }
+            }
+
+            rate
+        }
+    }
 
     fun seedPayConfig() {
         transaction {

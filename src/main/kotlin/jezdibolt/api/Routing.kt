@@ -16,4 +16,5 @@ fun Application.configureRouting() {
     earningsApi()
     userApi()
     authApi()
+    payConfigApi()
 }

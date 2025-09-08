@@ -48,12 +48,7 @@ class BoltImportService {
         val COL_CONTACT   = headerIndex["Telefonní číslo"]
 
         val COL_GROSS_TOTAL = headerIndex["Hrubý výdělek (celkem)|Kč"]
-        val COL_GROSS_APP   = headerIndex["Hrubý výdělek (platby v aplikaci)|Kč"]
-        val COL_GROSS_CASH  = headerIndex["Hrubý výdělek (platby v hotovosti)|Kč"]
-        val COL_TIPS        = headerIndex["Spropitné|Kč"]
-        val COL_NET         = headerIndex["Čisté výdělky|Kč"]
         val COL_H_GROSS     = headerIndex["Hrubý výdělek za hodinu|Kč/hod."]
-        val COL_H_NET       = headerIndex["Čistý výdělek za hodinu|Kč/hod."]
         val COL_CASH_TAKEN  = headerIndex["Vybraná hotovost|Kč"]
 
         var imported = 0
@@ -73,7 +68,6 @@ class BoltImportService {
                 val contact = COL_CONTACT?.let { row.getCell(it)?.stringValue()?.ifBlank { "" } }
                 val userId = findOrCreateUserByEmail(email, name, contact)
 
-
                 if (uniqId != null) {
                     val exists = BoltEarnings
                         .selectAll()
@@ -89,21 +83,36 @@ class BoltImportService {
 
                 fun dec(col: Int?) = col?.let { row.getCell(it)?.decimalOrNull() }
 
+                val grossTotal = dec(COL_GROSS_TOTAL)
+                val hourlyGross = dec(COL_H_GROSS)
+                val cashTaken = dec(COL_CASH_TAKEN) ?: BigDecimal.ZERO
+
+                // spočítat odpracované hodiny
+                val hoursWorked = if (hourlyGross != null && hourlyGross > BigDecimal.ZERO && grossTotal != null) {
+                    grossTotal.divide(hourlyGross, 2, java.math.RoundingMode.HALF_UP).toInt()
+                } else {
+                    0
+                }
+
+                // zjistit aktuální sazbu podle PAY_RATES
+                val appliedRate = PayoutService.getAppliedRate(hoursWorked, hourlyGross?.toInt() ?: 0)
+
+                // spočítat výplatu podle tehdy platné sazby
+                val payout = BigDecimal(appliedRate) * BigDecimal(hoursWorked)
+
                 BoltEarnings.insert {
                     it[BoltEarnings.userId] = userId
                     it[BoltEarnings.batchId] = batchId
                     it[BoltEarnings.driverIdentifier] = driverId
                     it[BoltEarnings.uniqueIdentifier] = uniqId
 
-                    it[BoltEarnings.grossTotal]  = dec(COL_GROSS_TOTAL)
-                    it[BoltEarnings.grossApp]    = dec(COL_GROSS_APP)
-                    it[BoltEarnings.grossCash]   = dec(COL_GROSS_CASH)
-                    it[BoltEarnings.tips]        = dec(COL_TIPS)
-                    it[BoltEarnings.net]         = dec(COL_NET)
-                    it[BoltEarnings.hourlyGross] = dec(COL_H_GROSS)
-                    it[BoltEarnings.hourlyNet]   = dec(COL_H_NET)
-                    it[BoltEarnings.cashTaken]   = dec(COL_CASH_TAKEN)
+                    it[BoltEarnings.grossTotal]  = grossTotal
+                    it[BoltEarnings.hourlyGross] = hourlyGross
+                    it[BoltEarnings.cashTaken]   = cashTaken
 
+                    // nově uložené hodnoty
+                    it[BoltEarnings.appliedRate] = appliedRate
+                    it[BoltEarnings.payout] = payout
                 }
 
                 imported++
@@ -113,6 +122,7 @@ class BoltImportService {
         wb.close()
         return ImportResult(imported, skipped, batchId.value)
     }
+
 
     private fun findOrCreateUserByEmail(email: String, nameOrNull: String?, contactOrNull: String?): EntityID<Int> {
         val existing = UsersSchema.selectAll().where { UsersSchema.email eq email }.singleOrNull()
