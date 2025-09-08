@@ -22,7 +22,12 @@ fun Application.authApi() {
             data class LoginRequest(val email: String, val password: String)
 
             @Serializable
-            data class LoginResponse(val token: String, val role: String)
+            data class LoginResponse(
+                val id: Int,
+                val name: String,
+                val role: String,
+                val token: String
+            )
 
             post("/login") {
                 val body = call.receive<LoginRequest>()
@@ -46,7 +51,9 @@ fun Application.authApi() {
                     return@post
                 }
 
-                // Vytvoření JWT tokenu
+                val userId = user[UsersSchema.id].value
+                val name = user[UsersSchema.name]
+
                 val jwtSecret = "secret"
                 val jwtIssuer = "jezdibolt-app"
                 val jwtAudience = "jezdibolt-users"
@@ -54,12 +61,20 @@ fun Application.authApi() {
                 val token = JWT.create()
                     .withIssuer(jwtIssuer)
                     .withAudience(jwtAudience)
+                    .withClaim("id", userId)
                     .withClaim("email", body.email)
                     .withClaim("role", role)
-                    .withExpiresAt(Date(System.currentTimeMillis() + 36_000_00)) // 1 hodina
+                    .withExpiresAt(Date(System.currentTimeMillis() + 36_000_00))
                     .sign(Algorithm.HMAC256(jwtSecret))
 
-                call.respond(LoginResponse(token, role))
+                call.respond(
+                    LoginResponse(
+                        id = userId,
+                        name = name,
+                        role = role,
+                        token = token
+                    )
+                )
             }
         }
     }

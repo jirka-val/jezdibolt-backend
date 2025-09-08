@@ -1,15 +1,11 @@
 package jezdibolt
 
-import jezdibolt.config.configureHTTP
-import jezdibolt.config.configureMonitoring
-import jezdibolt.config.configureSecurity
 import jezdibolt.api.configureRouting
 import jezdibolt.api.userApi
-import jezdibolt.config.configureSerialization
-import jezdibolt.config.configureDatabases
 import io.ktor.server.application.*
 import jezdibolt.api.earningsApi
 import jezdibolt.api.importApi
+import jezdibolt.config.*
 import jezdibolt.service.UserSeeder
 
 fun main(args: Array<String>) {
@@ -17,6 +13,7 @@ fun main(args: Array<String>) {
 }
 
 fun Application.module() {
+
     configureHTTP()
     configureSerialization()
     configureDatabases()

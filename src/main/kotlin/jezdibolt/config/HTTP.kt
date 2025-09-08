@@ -12,13 +12,22 @@ fun Application.configureHTTP() {
         swaggerUI(path = "openapi")
     }
     install(Compression)
+
     install(CORS) {
         allowMethod(HttpMethod.Options)
+        allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Put)
         allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Patch)
+
+        allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Authorization)
         allowHeader("MyCustomHeader")
-        anyHost() // @TODO: Don't do this in production if possible. Try to limit it.
+
+        // pro dev klidně povolit všechno
+        anyHost()
+        //  pro produkci bys sem měl dát konkrétní origin, např.:
+        // host("http://localhost:5173")
     }
 }
