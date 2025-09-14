@@ -50,6 +50,7 @@ class BoltImportService {
         val COL_GROSS_TOTAL = headerIndex["Hrubý výdělek (celkem)|Kč"]
         val COL_H_GROSS     = headerIndex["Hrubý výdělek za hodinu|Kč/hod."]
         val COL_CASH_TAKEN  = headerIndex["Vybraná hotovost|Kč"]
+        val COL_TIPS        = headerIndex["Spropitné|Kč"]
 
         var imported = 0
         var skipped = 0
@@ -86,6 +87,7 @@ class BoltImportService {
                 val grossTotal = dec(COL_GROSS_TOTAL)
                 val hourlyGross = dec(COL_H_GROSS)
                 val cashTaken = dec(COL_CASH_TAKEN) ?: BigDecimal.ZERO
+                val tips = dec(COL_TIPS) ?: BigDecimal.ZERO
 
                 // spočítat odpracované hodiny
                 val hoursWorked = if (hourlyGross != null && hourlyGross > BigDecimal.ZERO && grossTotal != null) {
@@ -97,8 +99,8 @@ class BoltImportService {
                 // zjistit aktuální sazbu podle PAY_RATES
                 val appliedRate = PayoutService.getAppliedRate(hoursWorked, hourlyGross?.toInt() ?: 0)
 
-                // spočítat výplatu podle tehdy platné sazby
-                val payout = BigDecimal(appliedRate) * BigDecimal(hoursWorked)
+                // výplata: (hodiny * sazba) + tips − hotovost
+                val payout = (BigDecimal(appliedRate) * BigDecimal(hoursWorked)) + tips - cashTaken
 
                 BoltEarnings.insert {
                     it[BoltEarnings.userId] = userId
@@ -109,10 +111,10 @@ class BoltImportService {
                     it[BoltEarnings.grossTotal]  = grossTotal
                     it[BoltEarnings.hourlyGross] = hourlyGross
                     it[BoltEarnings.cashTaken]   = cashTaken
+                    it[BoltEarnings.tips]        = tips
 
-                    // nově uložené hodnoty
                     it[BoltEarnings.appliedRate] = appliedRate
-                    it[BoltEarnings.payout] = payout
+                    it[BoltEarnings.payout]      = payout
                 }
 
                 imported++

@@ -5,13 +5,9 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import jezdibolt.model.Car
-import jezdibolt.model.RentalRecord
-import jezdibolt.model.UsersSchema
+import jezdibolt.model.ContractType
 import jezdibolt.service.RentalRecordService
 import kotlinx.serialization.Serializable
-import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -22,20 +18,12 @@ data class RentalRecordDto(
     val userId: Int,
     val startDate: String,
     val endDate: String?,
-    val pricePerWeek: String,
+    val pricePerWeek: String?,
     val totalPrice: String?,
-    val notes: String?
-)
-
-fun RentalRecord.toDto() = RentalRecordDto(
-    id = id.value,
-    carId = car.id.value,
-    userId = userId.value,
-    startDate = startDate.toString(),
-    endDate = endDate?.toString(),
-    pricePerWeek = pricePerWeek.toPlainString(),
-    totalPrice = totalPrice?.toPlainString(),
-    notes = notes
+    val notes: String?,
+    val userName: String,
+    val carName: String,
+    val contractType: String
 )
 
 @Serializable
@@ -44,24 +32,27 @@ data class RentalRecordRequest(
     val userId: Int,
     val startDate: String,
     val endDate: String? = null,
-    val pricePerWeek: String,
-    val notes: String? = null
+    val pricePerWeek: String? = null,
+    val notes: String? = null,
+    val contractType: String
 )
 
 fun Application.rentalApi(service: RentalRecordService = RentalRecordService()) {
     routing {
         route("/rentals") {
 
+            // všechny záznamy
             get {
-                val rentals = transaction { service.listRentals().map { it.toDto() } }
+                val rentals = service.listRentals()
                 call.respond(HttpStatusCode.OK, rentals)
             }
 
+            // detail
             get("/{id}") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
-                val rental = transaction { service.getRental(id)?.toDto() }
+                val rental = service.getRental(id)
                 if (rental == null) {
                     call.respond(HttpStatusCode.NotFound, mapOf("error" to "Rental not found"))
                 } else {
@@ -69,22 +60,22 @@ fun Application.rentalApi(service: RentalRecordService = RentalRecordService()) 
                 }
             }
 
+            // vytvoření
             post {
                 val req = call.receive<RentalRecordRequest>()
-                val rental = transaction {
-                    service.createRental(
-                        carId = req.carId,
-                        userId = req.userId,
-                        startDate = LocalDate.parse(req.startDate),
-                        endDate = req.endDate?.let { LocalDate.parse(it) },
-                        pricePerWeek = BigDecimal(req.pricePerWeek),
-                        notes = req.notes
-                    ).toDto()
-                }
+                val rental = service.createRental(
+                    carId = req.carId,
+                    userId = req.userId,
+                    startDate = LocalDate.parse(req.startDate),
+                    endDate = req.endDate?.let { LocalDate.parse(it) },
+                    pricePerWeek = req.pricePerWeek?.let { BigDecimal(it) },
+                    notes = req.notes,
+                    contractType = ContractType.valueOf(req.contractType)
+                )
                 call.respond(HttpStatusCode.Created, rental)
             }
 
-
+            // uzavření pronájmu
             put("/{id}/close") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
@@ -98,10 +89,11 @@ fun Application.rentalApi(service: RentalRecordService = RentalRecordService()) 
                 if (rental == null) {
                     call.respond(HttpStatusCode.NotFound, mapOf("error" to "Rental not found"))
                 } else {
-                    call.respond(HttpStatusCode.OK, rental.toDto())
+                    call.respond(HttpStatusCode.OK, rental)
                 }
             }
 
+            // smazání
             delete("/{id}") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))

@@ -1,9 +1,6 @@
 package jezdibolt.repository
 
-import jezdibolt.model.Car
 import jezdibolt.model.RentalRecord
-import jezdibolt.model.RentalRecords
-import jezdibolt.model.UsersSchema
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
@@ -28,8 +25,8 @@ class RentalRecordRepository {
         notes: String?
     ): RentalRecord = transaction {
         RentalRecord.new {
-            car = Car.findById(carId) ?: error("Car not found")
-            this.userId = EntityID(userId, UsersSchema)
+            this.car = jezdibolt.model.Car.findById(carId)!!
+            this.user = jezdibolt.model.User.findById(userId)!!
             this.startDate = startDate
             this.endDate = endDate
             this.pricePerWeek = pricePerWeek
@@ -37,20 +34,21 @@ class RentalRecordRepository {
         }
     }
 
+    fun closeRental(id: Int, endDate: LocalDate): RentalRecord? = transaction {
+        val record = RentalRecord.findById(id) ?: return@transaction null
+        record.closeRental(endDate)
+        record
+    }
 
     fun update(id: Int, builder: RentalRecord.() -> Unit): RentalRecord? = transaction {
-        val rental = RentalRecord.findById(id)
-        rental?.apply(builder)
+        val record = RentalRecord.findById(id) ?: return@transaction null
+        record.apply(builder)
+        record
     }
 
     fun delete(id: Int): Boolean = transaction {
-        val rental = RentalRecord.findById(id)
-        rental?.delete()
-        rental != null
-    }
-
-    fun closeRental(id: Int, endDate: LocalDate): RentalRecord? = transaction {
-        val rental = RentalRecord.findById(id)
-        rental?.apply { closeRental(endDate) }
+        val record = RentalRecord.findById(id) ?: return@transaction false
+        record.delete()
+        true
     }
 }

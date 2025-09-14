@@ -20,18 +20,15 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
     val uniqueIdentifier = varchar("unique_identifier", 100).nullable()
 
     val grossTotal  = decimal("gross_total_kc", 12, 2).nullable()
-    val grossApp    = decimal("gross_app_kc",   12, 2).nullable()
-    val grossCash   = decimal("gross_cash_kc",  12, 2).nullable()
     val tips        = decimal("tips_kc",        12, 2).nullable()
-    val net         = decimal("net_earnings_kc",12, 2).nullable()
     val hourlyGross = decimal("hourly_gross_kc",12, 2).nullable()
-    val hourlyNet   = decimal("hourly_net_kc",  12, 2).nullable()
 
     val cashTaken   = decimal("cash_taken_kc",  12, 2).nullable()
 
     val appliedRate = integer("applied_rate").nullable()          // sazba použitá při importu
     val payout = decimal("payout_kc", 12, 2).nullable()           // výplata vypočtená při importu
 
+    val partiallyPaid = decimal("partially_paid_kc", 12, 2).default(BigDecimal.ZERO)
 
     val paid = bool("paid").default(false)
     val paidAt = datetime("paid_at").nullable()

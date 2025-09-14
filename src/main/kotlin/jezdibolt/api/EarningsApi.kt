@@ -15,6 +15,9 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
 import java.math.RoundingMode
 
+@Serializable
+data class PayRequest(val amount: String)
+
 fun Application.earningsApi() {
     routing {
         route("/earnings") {
@@ -63,22 +66,49 @@ fun Application.earningsApi() {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid id"))
 
-                transaction {
-                    BoltEarnings.update({ BoltEarnings.id eq id }) {
-                        it[paid] = true
-                        it[paidAt] = CurrentDateTime
+                val body = runCatching { call.receiveNullable<PayRequest>() }.getOrNull()
+                val amount = body?.amount?.toBigDecimalOrNull()
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing or invalid amount"))
+
+                val result: Map<String, String> = transaction {
+                    val row = BoltEarnings.selectAll().where { BoltEarnings.id eq id }.singleOrNull()
+                        ?: return@transaction mapOf("error" to "Earning not found")
+
+                    val payout = row[BoltEarnings.payout] ?: BigDecimal.ZERO
+                    val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
+                    val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
+                    val alreadyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
+
+                    val settlement = payout + bonus - penalty - alreadyPaid
+
+                    if (amount >= settlement) {
+                        // full payment
+                        BoltEarnings.update({ BoltEarnings.id eq id }) {
+                            it[paid] = true
+                            it[paidAt] = CurrentDateTime
+                            it[partiallyPaid] = payout + bonus - penalty
+                        }
+                        mapOf("status" to "fully paid", "amount" to amount.toPlainString())
+                    } else {
+                        // partial payment
+                        BoltEarnings.update({ BoltEarnings.id eq id }) {
+                            it[partiallyPaid] = alreadyPaid + amount
+                        }
+                        mapOf("status" to "partially paid", "amount" to amount.toPlainString())
                     }
                 }
 
-                call.respond(HttpStatusCode.OK, mapOf("status" to "marked as paid"))
+                if (result.containsKey("error")) {
+                    call.respond(HttpStatusCode.NotFound, result)
+                } else {
+                    call.respond(HttpStatusCode.OK, result)
+                }
             }
+
 
             get("/imports/{id}") {
                 val batchIdParam = call.parameters["id"]?.toIntOrNull()
-                if (batchIdParam == null) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid batchId"))
-                    return@get
-                }
+                    ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid batchId"))
 
                 try {
                     val results = transaction {
@@ -91,26 +121,24 @@ fun Application.earningsApi() {
                                 val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
                                 val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
                                 val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
+                                val partiallyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-                                // odpracované hodiny (čistě pro info)
                                 val hoursWorked = if (hourlyGross > BigDecimal.ZERO) {
                                     grossTotal.divide(hourlyGross, 2, RoundingMode.HALF_UP).toInt()
                                 } else {
                                     0
                                 }
 
-                                // ✅ použít uložené hodnoty, fallback pro starší importy
                                 val appliedRate = row[BoltEarnings.appliedRate] ?: 0
                                 val payout = row[BoltEarnings.payout] ?: run {
                                     if (hoursWorked > 0) {
                                         val rate = PayoutService.getAppliedRate(hoursWorked, hourlyGross.toInt())
                                         BigDecimal(rate) * BigDecimal(hoursWorked)
-                                    } else {
-                                        BigDecimal.ZERO
-                                    }
+                                    } else BigDecimal.ZERO
                                 }
 
-                                val settlement = payout - cashTaken + bonus - penalty
+                                // settlement = co zbývá uhradit
+                                val settlement = payout + bonus - penalty - partiallyPaid
 
                                 EarningsDto(
                                     id = row[BoltEarnings.id].value,
@@ -122,21 +150,17 @@ fun Application.earningsApi() {
                                     cashTaken = cashTaken.toPlainString(),
                                     bonus = bonus.toPlainString(),
                                     penalty = penalty.toPlainString(),
+                                    partiallyPaid = partiallyPaid.toPlainString(),
                                     settlement = settlement.toPlainString(),
                                     paid = row[BoltEarnings.paid]
                                 )
                             }
                     }
-
                     call.respond(HttpStatusCode.OK, results)
                 } catch (e: Exception) {
-                    call.respond(
-                        HttpStatusCode.InternalServerError,
-                        mapOf("error" to "Failed to fetch earnings data")
-                    )
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to fetch earnings data"))
                 }
             }
-
         }
     }
 }
@@ -152,6 +176,7 @@ data class EarningsDto(
     val cashTaken: String,
     val bonus: String,
     val penalty: String,
+    val partiallyPaid: String,
     val settlement: String,
     val paid: Boolean
 )
