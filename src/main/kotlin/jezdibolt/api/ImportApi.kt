@@ -16,7 +16,7 @@ import org.jetbrains.exposed.sql.SortOrder
 import java.io.ByteArrayOutputStream
 import jezdibolt.model.ImportBatches
 
-// 🔹 DTO pro výsledek importu (serializovatelný)
+// DTO pro výsledek importu (serializovatelný)
 @Serializable
 data class ImportResultDto(
     val imported: Int,
@@ -24,14 +24,14 @@ data class ImportResultDto(
     val batchId: Int
 )
 
-// 🔹 odpověď pro POST /import/bolt
+// odpověď pro POST /import/bolt
 @Serializable
 data class ImportResponse(
     val importResult: ImportResultDto,
     val filename: String
 )
 
-// 🔹 odpověď pro GET /import/list
+// odpověď pro GET /import/list
 @Serializable
 data class ImportBatchDto(
     val id: Int,
@@ -55,56 +55,33 @@ fun Application.importApi() {
                     }
 
                     val multipart = call.receiveMultipart()
-                    var result: BoltImportService.ImportResult? = null
-                    var uploadedFilename: String? = null
-                    var conflictError: String? = null
+                    val files = mutableListOf<Pair<ByteArray, String>>()
 
                     multipart.forEachPart { part ->
                         when (part) {
                             is PartData.FileItem -> {
-                                val filename = part.originalFileName ?: "unknown.xlsx"
-                                uploadedFilename = filename
-
-                                // ✅ kontrola duplicit
-                                val exists = transaction {
-                                    ImportBatches
-                                        .selectAll()
-                                        .any { it[ImportBatches.filename] == filename }
+                                val filename = part.originalFileName ?: "unknown.csv"
+                                val bytes = withContext(Dispatchers.IO) {
+                                    val outputStream = ByteArrayOutputStream()
+                                    part.streamProvider().use { input -> input.copyTo(outputStream) }
+                                    outputStream.toByteArray()
                                 }
-                                if (exists) {
-                                    conflictError = "Soubor '$filename' už byl importován."
-                                } else {
-                                    val bytes = withContext(Dispatchers.IO) {
-                                        val outputStream = ByteArrayOutputStream()
-                                        part.streamProvider().use { input -> input.copyTo(outputStream) }
-                                        outputStream.toByteArray()
-                                    }
-
-                                    val service = BoltImportService()
-                                    result = service.importXlsx(bytes, filename)
-                                }
+                                files.add(bytes to filename)
                             }
                             else -> Unit
                         }
                         part.dispose()
                     }
 
-                    // ✅ rozhodnutí až po forEachPart
-                    if (conflictError != null) {
-                        call.respond(HttpStatusCode.Conflict, mapOf("error" to conflictError))
-                    } else if (result == null || uploadedFilename == null) {
-                        call.respond(
-                            HttpStatusCode.BadRequest,
-                            mapOf("error" to "No file uploaded")
-                        )
-                    } else {
-                        val dto = ImportResultDto(
-                            imported = result!!.imported,
-                            skipped = result!!.skipped,
-                            batchId = result!!.batchId
-                        )
-                        call.respond(HttpStatusCode.OK, ImportResponse(dto, uploadedFilename!!))
+                    if (files.isEmpty()) {
+                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to "No files uploaded"))
+                        return@post
                     }
+
+                    val service = BoltImportService()
+                    val result = service.importFiles(files)
+
+                    call.respond(HttpStatusCode.OK, result)
                 } catch (e: Exception) {
                     e.printStackTrace()
                     call.respond(
@@ -114,7 +91,6 @@ fun Application.importApi() {
                 }
             }
 
-            // 🔹 nový endpoint pro list importů
             get("/list") {
                 val imports = transaction {
                     ImportBatches

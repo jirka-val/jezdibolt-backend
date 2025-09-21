@@ -25,6 +25,7 @@ dependencies {
 
     implementation("org.mindrot:jbcrypt:0.4")
 
+    implementation("org.apache.commons:commons-csv:1.11.0")
 
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.swagger)

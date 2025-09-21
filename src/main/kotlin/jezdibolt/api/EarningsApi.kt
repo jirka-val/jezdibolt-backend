@@ -35,7 +35,7 @@ fun Application.earningsApi() {
 
                 transaction {
                     BoltEarnings.update({ BoltEarnings.id eq id }) {
-                        it[bonus] = bonusValue
+                        it[BoltEarnings.bonus] = bonusValue
                     }
                 }
 
@@ -55,7 +55,7 @@ fun Application.earningsApi() {
 
                 transaction {
                     BoltEarnings.update({ BoltEarnings.id eq id }) {
-                        it[penalty] = penaltyValue
+                        it[BoltEarnings.penalty] = penaltyValue
                     }
                 }
 
@@ -74,25 +74,27 @@ fun Application.earningsApi() {
                     val row = BoltEarnings.selectAll().where { BoltEarnings.id eq id }.singleOrNull()
                         ?: return@transaction mapOf("error" to "Earning not found")
 
-                    val payout = row[BoltEarnings.payout] ?: BigDecimal.ZERO
+                    val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
+                    val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
                     val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
                     val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
                     val alreadyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-                    val settlement = payout + bonus - penalty - alreadyPaid
+                    // settlement = earnings - cashTaken + bonus - penalty - alreadyPaid
+                    val settlement = earnings - cashTaken + bonus - penalty - alreadyPaid
 
                     if (amount >= settlement) {
                         // full payment
                         BoltEarnings.update({ BoltEarnings.id eq id }) {
-                            it[paid] = true
-                            it[paidAt] = CurrentDateTime
-                            it[partiallyPaid] = payout + bonus - penalty
+                            it[BoltEarnings.paid] = true
+                            it[BoltEarnings.paidAt] = CurrentDateTime
+                            it[BoltEarnings.partiallyPaid] = earnings - cashTaken + bonus - penalty
                         }
                         mapOf("status" to "fully paid", "amount" to amount.toPlainString())
                     } else {
                         // partial payment
                         BoltEarnings.update({ BoltEarnings.id eq id }) {
-                            it[partiallyPaid] = alreadyPaid + amount
+                            it[BoltEarnings.partiallyPaid] = alreadyPaid + amount
                         }
                         mapOf("status" to "partially paid", "amount" to amount.toPlainString())
                     }
@@ -104,7 +106,6 @@ fun Application.earningsApi() {
                     call.respond(HttpStatusCode.OK, result)
                 }
             }
-
 
             get("/imports/{id}") {
                 val batchIdParam = call.parameters["id"]?.toIntOrNull()
@@ -123,22 +124,11 @@ fun Application.earningsApi() {
                                 val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
                                 val partiallyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-                                val hoursWorked = if (hourlyGross > BigDecimal.ZERO) {
-                                    grossTotal.divide(hourlyGross, 2, RoundingMode.HALF_UP).toInt()
-                                } else {
-                                    0
-                                }
-
+                                val hoursWorked = row[BoltEarnings.hoursWorked]
                                 val appliedRate = row[BoltEarnings.appliedRate] ?: 0
-                                val payout = row[BoltEarnings.payout] ?: run {
-                                    if (hoursWorked > 0) {
-                                        val rate = PayoutService.getAppliedRate(hoursWorked, hourlyGross.toInt())
-                                        BigDecimal(rate) * BigDecimal(hoursWorked)
-                                    } else BigDecimal.ZERO
-                                }
+                                val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
 
-                                // settlement = co zbývá uhradit
-                                val settlement = payout + bonus - penalty - partiallyPaid
+                                val settlement = earnings - cashTaken + bonus - penalty - partiallyPaid
 
                                 EarningsDto(
                                     id = row[BoltEarnings.id].value,
@@ -146,7 +136,7 @@ fun Application.earningsApi() {
                                     email = row[UsersSchema.email],
                                     hoursWorked = hoursWorked,
                                     grossPerHour = appliedRate,
-                                    payout = payout.toPlainString(),
+                                    earnings = earnings.toPlainString(),
                                     cashTaken = cashTaken.toPlainString(),
                                     bonus = bonus.toPlainString(),
                                     penalty = penalty.toPlainString(),
@@ -172,7 +162,7 @@ data class EarningsDto(
     val email: String,
     val hoursWorked: Int,
     val grossPerHour: Int,
-    val payout: String,
+    val earnings: String,
     val cashTaken: String,
     val bonus: String,
     val penalty: String,

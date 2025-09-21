@@ -9,6 +9,8 @@ import java.math.BigDecimal
 object ImportBatches : IntIdTable("import_batches") {
     val filename = varchar("filename", 255)
     val isoWeek = varchar("iso_week", 10)
+    val company = varchar("company", 255) // Firma / fleet
+    val city = varchar("city", 100).nullable() // Město (Brno, Praha, Ostrava…)
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
 }
 
@@ -23,10 +25,13 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
     val tips        = decimal("tips_kc",        12, 2).nullable()
     val hourlyGross = decimal("hourly_gross_kc",12, 2).nullable()
 
+    val hoursWorked = integer("hours_worked").default(0)          // ✅ uložené hodiny
     val cashTaken   = decimal("cash_taken_kc",  12, 2).nullable()
 
     val appliedRate = integer("applied_rate").nullable()          // sazba použitá při importu
-    val payout = decimal("payout_kc", 12, 2).nullable()           // výplata vypočtená při importu
+
+    val earnings   = decimal("earnings_kc", 12, 2).nullable()     // nárok (hodiny × sazba + tips)
+    val settlement = decimal("settlement_kc", 12, 2).nullable()   // vyrovnání (earnings − hotovost)
 
     val partiallyPaid = decimal("partially_paid_kc", 12, 2).default(BigDecimal.ZERO)
 
@@ -36,9 +41,10 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
     val bonus = decimal("bonus_kc", 12, 2).default(BigDecimal.ZERO)
     val penalty = decimal("penalty_kc", 12, 2).default(BigDecimal.ZERO)
 
-
     init {
         index(true, uniqueIdentifier, batchId)
     }
 }
+
+
 
