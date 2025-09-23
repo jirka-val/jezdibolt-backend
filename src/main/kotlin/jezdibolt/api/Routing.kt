@@ -25,4 +25,5 @@ fun Application.configureRouting() {
     payConfigApi()
     carApi()
     rentalApi()
+    carAssignmentApi()
 }
