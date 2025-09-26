@@ -1,6 +1,7 @@
 package jezdibolt.repository
 
 import jezdibolt.model.*
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDate
 
@@ -46,6 +47,18 @@ class CarAssignmentRepository {
         val assignment = CarAssignment.findById(id) ?: return@transaction false
         assignment.delete()
         true
+    }
+
+    fun getActiveAssignmentsForUser(userId: Int): List<CarAssignment> = transaction {
+        CarAssignment.find {
+            (CarAssignments.userId eq userId) and CarAssignments.endDate.isNull()
+        }.toList()
+    }
+
+    fun hasActiveAssignmentForUser(userId: Int): Boolean = transaction {
+        CarAssignment.find {
+            (CarAssignments.userId eq userId) and (CarAssignments.endDate.isNull())
+        }.empty().not()
     }
 
     fun getActiveAssignments(): List<CarAssignment> = transaction {

@@ -25,11 +25,23 @@ class CarAssignmentService(
         startDate: LocalDate,
         notes: String?
     ): CarAssignmentDto = transaction {
+        if (repo.hasActiveAssignmentForUser(userId)) {
+            throw IllegalStateException("Uživatel už má aktivní přiřazení!")
+        }
+
         repo.create(carId, userId, shiftType, startDate, notes).toDto()
+    }
+
+    fun listActiveAssignmentsForUser(userId: Int): List<CarAssignmentDto> = transaction {
+        repo.getActiveAssignmentsForUser(userId).map { it.toDto() }
     }
 
     fun closeAssignment(id: Int, endDate: LocalDate): CarAssignmentDto? = transaction {
         repo.closeAssignment(id, endDate)?.toDto()
+    }
+
+    fun getActiveAssignmentsForUser(userId: Int): List<CarAssignmentDto> = transaction {
+        repo.getActiveAssignmentsForUser(userId).map { it.toDto() }
     }
 
     fun deleteAssignment(id: Int): Boolean = transaction {

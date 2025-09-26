@@ -64,15 +64,20 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
             // vytvoření
             post {
                 val req = call.receive<CarAssignmentRequest>()
-                val assignment = service.createAssignment(
-                    carId = req.carId,
-                    userId = req.userId,
-                    shiftType = ShiftType.valueOf(req.shiftType),
-                    startDate = LocalDate.parse(req.startDate),
-                    notes = req.notes
-                )
-                call.respond(HttpStatusCode.Created, assignment)
+                try {
+                    val assignment = service.createAssignment(
+                        carId = req.carId,
+                        userId = req.userId,
+                        shiftType = ShiftType.valueOf(req.shiftType),
+                        startDate = LocalDate.parse(req.startDate),
+                        notes = req.notes
+                    )
+                    call.respond(HttpStatusCode.Created, assignment)
+                } catch (e: IllegalStateException) {
+                    call.respond(HttpStatusCode.Conflict, mapOf("error" to e.message))
+                }
             }
+
 
             // ukončení přiřazení
             put("/{id}/close") {
@@ -86,6 +91,20 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
                 } else {
                     call.respond(HttpStatusCode.OK, assignment)
                 }
+            }
+
+            get("/active/user/{userId}") {
+                val userId = call.parameters["userId"]?.toIntOrNull()
+                    ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid userId"))
+
+                val assignments = service.getActiveAssignmentsForUser(userId)
+                call.respond(HttpStatusCode.OK, assignments)
+            }
+
+            // aktivní záznamy
+            get("/active") {
+                val assignments = service.listActiveAssignments()
+                call.respond(HttpStatusCode.OK, assignments)
             }
 
             // smazání
