@@ -8,7 +8,7 @@ import java.math.BigDecimal
 
 object PayoutService {
 
-    fun calculatePayout(hours: Int, grossPerHour: Int): BigDecimal {
+    fun calculatePayout(hours: Double, grossPerHour: Double): BigDecimal {
         return transaction {
             val baseRateRow = PayRates
                 .selectAll()
@@ -23,14 +23,14 @@ object PayoutService {
             PayRules.selectAll().forEach { rule ->
                 when (rule[PayRules.type]) {
                     "min_hours" -> {
-                        if (hours <= rule[PayRules.hours]) {
+                        if (hours <= rule[PayRules.hours].toDouble()) {
                             if (rule[PayRules.mode] == "set") {
                                 rate = rule[PayRules.adjustment]
                             }
                         }
                     }
                     "bonus_hours" -> {
-                        if (hours >= rule[PayRules.hours]) {
+                        if (hours >= rule[PayRules.hours].toDouble()) {
                             if (rule[PayRules.mode] == "add") {
                                 rate += rule[PayRules.adjustment]
                             }
@@ -43,7 +43,7 @@ object PayoutService {
         }
     }
 
-    fun getAppliedRate(hours: Int, grossPerHour: Int): Int {
+    fun getAppliedRate(hours: Double, grossPerHour: Double): Int {
         return transaction {
             val baseRateRow = PayRates
                 .selectAll()
@@ -58,12 +58,12 @@ object PayoutService {
             PayRules.selectAll().forEach { rule ->
                 when (rule[PayRules.type]) {
                     "min_hours" -> {
-                        if (hours <= rule[PayRules.hours] && rule[PayRules.mode] == "set") {
+                        if (hours <= rule[PayRules.hours].toDouble() && rule[PayRules.mode] == "set") {
                             rate = rule[PayRules.adjustment]
                         }
                     }
                     "bonus_hours" -> {
-                        if (hours >= rule[PayRules.hours] && rule[PayRules.mode] == "add") {
+                        if (hours >= rule[PayRules.hours].toDouble() && rule[PayRules.mode] == "add") {
                             rate += rule[PayRules.adjustment]
                         }
                     }
@@ -122,5 +122,4 @@ object PayoutService {
             }
         }
     }
-
 }

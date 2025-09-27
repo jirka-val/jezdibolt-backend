@@ -20,7 +20,7 @@ fun Application.configureDatabases() {
     transaction(db) {
         SchemaUtils.createMissingTablesAndColumns(
             UsersSchema, ImportBatches, BoltEarnings,
-            PayRates, PayRules, Cars, RentalRecords, CarAssignments
+            PayRates, PayRules, Cars, RentalRecords, CarAssignments, Penalties, HistoryLogs
         )
         jezdibolt.service.PayoutService.seedPayConfig()
     }

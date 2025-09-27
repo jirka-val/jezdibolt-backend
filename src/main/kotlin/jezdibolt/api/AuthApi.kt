@@ -54,17 +54,18 @@ fun Application.authApi() {
                 val userId = user[UsersSchema.id].value
                 val name = user[UsersSchema.name]
 
-                val jwtSecret = "secret"
-                val jwtIssuer = "jezdibolt-app"
+                // stejné hodnoty jako v configureSecurity()
+                val jwtSecret = "super-secret"
+                val jwtIssuer = "jezdibolt"
                 val jwtAudience = "jezdibolt-users"
 
                 val token = JWT.create()
                     .withIssuer(jwtIssuer)
                     .withAudience(jwtAudience)
-                    .withClaim("id", userId)
+                    .withClaim("userId", userId)
                     .withClaim("email", body.email)
                     .withClaim("role", role)
-                    .withExpiresAt(Date(System.currentTimeMillis() + 36_000_00))
+                    .withExpiresAt(Date(System.currentTimeMillis() + 36_000_00)) // 10 hodin
                     .sign(Algorithm.HMAC256(jwtSecret))
 
                 call.respond(

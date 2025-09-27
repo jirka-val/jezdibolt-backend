@@ -25,7 +25,7 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
     val tips        = decimal("tips_kc",        12, 2).nullable()
     val hourlyGross = decimal("hourly_gross_kc",12, 2).nullable()
 
-    val hoursWorked = integer("hours_worked").default(0)          // ✅ uložené hodiny
+    val hoursWorked = decimal("hours_worked", 10, 2)
     val cashTaken   = decimal("cash_taken_kc",  12, 2).nullable()
 
     val appliedRate = integer("applied_rate").nullable()          // sazba použitá při importu

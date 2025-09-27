@@ -24,10 +24,9 @@ data class CarDto(
     val model: String,
     val year: Int,
     val fuelType: String,
-    val isTaxi: Boolean,
     val stkValidUntil: String?,
     val color: String?,
-    val status: String,
+    val city: String,
     val notes: String?,
     val photoUrl: String?
 )
@@ -39,10 +38,9 @@ fun Car.toDto() = CarDto(
     model = model,
     year = year,
     fuelType = fuelType,
-    isTaxi = isTaxi,
     stkValidUntil = stkValidUntil?.toString(),
     color = color,
-    status = status,
+    city = city,
     notes = notes,
     photoUrl = photoUrl
 )
@@ -54,10 +52,9 @@ data class CarRequest(
     val model: String,
     val year: Int,
     val fuelType: String,
-    val isTaxi: Boolean,
     val stkValidUntil: String?,
     val color: String?,
-    val status: String,
+    val city: String,
     val notes: String? = null
 )
 
@@ -91,10 +88,9 @@ fun Application.carApi(carService: CarService = CarService()) {
                         model = req.model
                         year = req.year
                         fuelType = req.fuelType
-                        isTaxi = req.isTaxi
                         stkValidUntil = req.stkValidUntil?.let { LocalDate.parse(it) }
                         color = req.color
-                        status = req.status
+                        city = req.city
                         notes = req.notes
                     }
                     call.respond(HttpStatusCode.Created, car.toDto())
@@ -159,10 +155,9 @@ fun Application.carApi(carService: CarService = CarService()) {
                     model = req.model
                     year = req.year
                     fuelType = req.fuelType
-                    isTaxi = req.isTaxi
                     stkValidUntil = req.stkValidUntil?.let { LocalDate.parse(it) }
                     color = req.color
-                    status = req.status
+                    city = req.city
                     notes = req.notes
                 }
                 if (updated == null) {

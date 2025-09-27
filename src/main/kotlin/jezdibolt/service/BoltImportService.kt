@@ -128,12 +128,12 @@ class BoltImportService {
                 val cashTaken = dec(COL_CASH_TAKEN) ?: BigDecimal.ZERO
                 val tips = dec(COL_TIPS) ?: BigDecimal.ZERO
 
-                val hoursWorked = if (hourlyGross != null && hourlyGross > BigDecimal.ZERO && grossTotal != null) {
-                    grossTotal.divide(hourlyGross, 2, java.math.RoundingMode.HALF_UP).toInt()
-                } else 0
+                val hoursWorked: BigDecimal = if (hourlyGross != null && hourlyGross > BigDecimal.ZERO && grossTotal != null) {
+                    grossTotal.divide(hourlyGross, 2, java.math.RoundingMode.HALF_UP)
+                } else BigDecimal.ZERO
 
-                val appliedRate = PayoutService.getAppliedRate(hoursWorked, hourlyGross?.toInt() ?: 0)
-                val earnings = (BigDecimal(appliedRate) * BigDecimal(hoursWorked)) + tips
+                val appliedRate = PayoutService.getAppliedRate(hoursWorked.toDouble(), hourlyGross?.toDouble() ?: 0.0)
+                val earnings = (BigDecimal(appliedRate) * hoursWorked) + tips
                 val settlement = earnings - cashTaken
 
                 BoltEarnings.insert {
@@ -244,12 +244,12 @@ class BoltImportService {
                 val cashTaken = dec(COL_CASH_TAKEN) ?: BigDecimal.ZERO
                 val tips = dec(COL_TIPS) ?: BigDecimal.ZERO
 
-                val hoursWorked = if (hourlyGross != null && hourlyGross > BigDecimal.ZERO && grossTotal != null) {
-                    grossTotal.divide(hourlyGross, 2, java.math.RoundingMode.HALF_UP).toInt()
-                } else 0
+                val hoursWorked: BigDecimal = if (hourlyGross != null && hourlyGross > BigDecimal.ZERO && grossTotal != null) {
+                    grossTotal.divide(hourlyGross, 2, java.math.RoundingMode.HALF_UP)
+                } else BigDecimal.ZERO
 
-                val appliedRate = PayoutService.getAppliedRate(hoursWorked, hourlyGross?.toInt() ?: 0)
-                val earnings = (BigDecimal(appliedRate) * BigDecimal(hoursWorked)) + tips
+                val appliedRate = PayoutService.getAppliedRate(hoursWorked.toDouble(), hourlyGross?.toDouble() ?: 0.0)
+                val earnings = (BigDecimal(appliedRate) * hoursWorked) + tips
                 val settlement = earnings - cashTaken
 
                 BoltEarnings.insert {

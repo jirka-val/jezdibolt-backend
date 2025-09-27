@@ -93,6 +93,22 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
                 }
             }
 
+            get("/byCarAndDate") {
+                val licensePlate = call.request.queryParameters["licensePlate"]
+                    ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing licensePlate"))
+                val dateStr = call.request.queryParameters["date"]
+                    ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing date"))
+
+                val date = try {
+                    LocalDate.parse(dateStr)
+                } catch (e: Exception) {
+                    return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid date format, expected YYYY-MM-DD"))
+                }
+
+                val assignments = service.findAssignmentsByCarAndDate(licensePlate, date)
+                call.respond(HttpStatusCode.OK, assignments)
+            }
+
             get("/active/user/{userId}") {
                 val userId = call.parameters["userId"]?.toIntOrNull()
                     ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid userId"))

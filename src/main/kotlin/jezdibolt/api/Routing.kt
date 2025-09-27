@@ -11,7 +11,7 @@ fun Application.configureRouting() {
             call.respondText("Hello World!")
         }
 
-        //  statické servírování nahraných souborů
+        // statické servírování nahraných souborů
         static("/uploads") {
             files("uploads")
         }
@@ -26,4 +26,6 @@ fun Application.configureRouting() {
     carApi()
     rentalApi()
     carAssignmentApi()
+    penaltyApi()
+    historyApi()
 }

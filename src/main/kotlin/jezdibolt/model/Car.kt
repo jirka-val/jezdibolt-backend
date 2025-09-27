@@ -14,11 +14,8 @@ class Car(id: EntityID<Int>) : IntEntity(id) {
     var model by Cars.model
     var year by Cars.year
     var fuelType by Cars.fuelType
-    var isTaxi by Cars.isTaxi
     var stkValidUntil by Cars.stkValidUntil
     var color by Cars.color
-    var status by Cars.status
+    var city by Cars.city
     var notes by Cars.notes
 }
-
-

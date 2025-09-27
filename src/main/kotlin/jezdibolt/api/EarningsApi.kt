@@ -13,7 +13,6 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
-import java.math.RoundingMode
 
 @Serializable
 data class PayRequest(val amount: String)
@@ -119,13 +118,17 @@ fun Application.earningsApi() {
                             .map { row ->
                                 val grossTotal = row[BoltEarnings.grossTotal] ?: BigDecimal.ZERO
                                 val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
+                                val hoursWorked = row[BoltEarnings.hoursWorked] ?: BigDecimal.ZERO
                                 val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
                                 val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
                                 val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
                                 val partiallyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-                                val hoursWorked = row[BoltEarnings.hoursWorked]
-                                val appliedRate = row[BoltEarnings.appliedRate] ?: 0
+                                val appliedRate = PayoutService.getAppliedRate(
+                                    hoursWorked.toDouble(),
+                                    hourlyGross.toDouble()
+                                )
+
                                 val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
 
                                 val settlement = earnings - cashTaken + bonus - penalty - partiallyPaid
@@ -134,7 +137,7 @@ fun Application.earningsApi() {
                                     id = row[BoltEarnings.id].value,
                                     userName = row[UsersSchema.name],
                                     email = row[UsersSchema.email],
-                                    hoursWorked = hoursWorked,
+                                    hoursWorked = hoursWorked.toDouble(),
                                     grossPerHour = appliedRate,
                                     earnings = earnings.toPlainString(),
                                     cashTaken = cashTaken.toPlainString(),
@@ -160,7 +163,7 @@ data class EarningsDto(
     val id: Int,
     val userName: String,
     val email: String,
-    val hoursWorked: Int,
+    val hoursWorked: Double,
     val grossPerHour: Int,
     val earnings: String,
     val cashTaken: String,

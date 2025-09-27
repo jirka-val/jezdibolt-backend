@@ -3,6 +3,12 @@ package jezdibolt.service
 import jezdibolt.api.CarAssignmentDto
 import jezdibolt.model.*
 import jezdibolt.repository.CarAssignmentRepository
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDate
 
@@ -30,6 +36,19 @@ class CarAssignmentService(
         }
 
         repo.create(carId, userId, shiftType, startDate, notes).toDto()
+    }
+
+    fun findAssignmentsByCarAndDate(licensePlate: String, date: LocalDate): List<CarAssignmentDto> {
+        return transaction {
+            val car = Car.find { Cars.licensePlate eq licensePlate }.singleOrNull()
+                ?: return@transaction emptyList()
+
+            CarAssignment.find {
+                (CarAssignments.carId eq car.id) and
+                        (CarAssignments.startDate lessEq date) and
+                        ((CarAssignments.endDate.isNull()) or (CarAssignments.endDate greaterEq date))
+            }.map { it.toDto() }
+        }
     }
 
     fun listActiveAssignmentsForUser(userId: Int): List<CarAssignmentDto> = transaction {

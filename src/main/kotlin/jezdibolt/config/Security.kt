@@ -7,14 +7,15 @@ import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
 
 fun Application.configureSecurity() {
-    val secret = "super-secret" // TODO: načíst z env/configu
-    val issuer = "jezdibolt"
+    val secret = "super-secret" // stejné jako v authApi
+    val issuer = "jezdibolt"    // stejné jako v authApi
     val audience = "jezdibolt-users"
     val realm = "Access to Jezdibolt"
 
     install(Authentication) {
         jwt("auth-jwt") {
             this.realm = realm
+
             verifier(
                 JWT
                     .require(Algorithm.HMAC256(secret))
@@ -22,10 +23,15 @@ fun Application.configureSecurity() {
                     .withIssuer(issuer)
                     .build()
             )
+
             validate { credential ->
-                val userId = credential.payload.getClaim("userId").asInt()
+                val userId = credential.payload.getClaim("userId").asInt() // 👈 musí být "userId"
                 val role = credential.payload.getClaim("role").asString()
-                if (userId != null && role != null) JWTPrincipal(credential.payload) else null
+                if (userId != null && role != null) {
+                    JWTPrincipal(credential.payload)
+                } else {
+                    null
+                }
             }
         }
     }
