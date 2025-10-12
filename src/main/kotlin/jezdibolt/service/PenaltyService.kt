@@ -6,6 +6,12 @@ import jezdibolt.repository.PenaltyRepository
 class PenaltyService(
     private val penaltyRepository: PenaltyRepository = PenaltyRepository()
 ) {
-    fun getAllPenalties(): List<PenaltyDTO> = penaltyRepository.getAll()
-    fun createPenalty(penalty: PenaltyDTO): PenaltyDTO = penaltyRepository.create(penalty)
+    fun getAllPenalties(paidFilter: Boolean? = null): List<PenaltyDTO> =
+        penaltyRepository.getAll(paidFilter)
+
+    fun createPenalty(penalty: PenaltyDTO): PenaltyDTO =
+        penaltyRepository.create(penalty)
+
+    fun markAsPaid(id: Int, resolverId: Int?): Boolean =
+        penaltyRepository.markAsPaid(id, resolverId)
 }
