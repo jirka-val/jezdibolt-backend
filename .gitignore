@@ -1,10 +1,16 @@
-.gradle
+# ============================================================
+# 🚖 JEZDIBOLT BACKEND – .gitignore
+# Kotlin + Ktor + Gradle
+# ============================================================
+
+### Gradle ###
+.gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-### STS ###
+### Spring Tool Suite (STS) ###
 .apt_generated
 .classpath
 .factorypath
@@ -17,13 +23,14 @@ bin/
 !**/src/test/**/bin/
 
 ### IntelliJ IDEA ###
-.idea
+.idea/
 *.iws
 *.iml
 *.ipr
 out/
 !**/src/main/**/out/
 !**/src/test/**/out/
+.idea/runConfigurations/
 
 ### NetBeans ###
 /nbproject/private/
@@ -34,3 +41,61 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### OS-specific ###
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+### Build artifacts ###
+/out/
+/target/
+/bin/
+
+### Logs ###
+*.log
+logs/
+**/logs/
+nohup.out
+
+### Environment & secrets ###
+.env
+*.env
+.env.*
+.envrc
+
+### Temporary / uploads ###
+uploads/
+tmp/
+temp/
+cache/
+
+### Databases ###
+*.db
+*.mv.db
+*.trace.db
+
+### Kotlin / Java ###
+/.kotlinc/
+kotlin-js-store/
+kotlin-daemon.*.log
+
+### Test & Reports ###
+/test-results/
+/reports/
+/coverage/
+
+### Miscellaneous ###
+*.swp
+*.swo
+*.bak
+*.old
+*.orig
+
+# ============================================================
+#  Notes:
+# - Commit .env.example instead of .env
+# - Keep gradle-wrapper.jar for build reproducibility
+# - uploads/ ignored because user data shouldn't be versioned
+# ============================================================
