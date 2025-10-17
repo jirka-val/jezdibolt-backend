@@ -72,6 +72,10 @@ fun Application.rentalApi(service: RentalRecordService = RentalRecordService()) 
                     notes = req.notes,
                     contractType = ContractType.valueOf(req.contractType)
                 )
+
+                // ✅ Oznámení přes WebSocket
+                WebSocketConnections.broadcast("""{"type":"rental_created","id":${rental.id}}""")
+
                 call.respond(HttpStatusCode.Created, rental)
             }
 
@@ -89,6 +93,9 @@ fun Application.rentalApi(service: RentalRecordService = RentalRecordService()) 
                 if (rental == null) {
                     call.respond(HttpStatusCode.NotFound, mapOf("error" to "Rental not found"))
                 } else {
+                    // ✅ Oznámení přes WebSocket
+                    WebSocketConnections.broadcast("""{"type":"rental_closed","id":$id}""")
+
                     call.respond(HttpStatusCode.OK, rental)
                 }
             }
@@ -100,6 +107,9 @@ fun Application.rentalApi(service: RentalRecordService = RentalRecordService()) 
 
                 val deleted = service.deleteRental(id)
                 if (deleted) {
+                    // ✅ Oznámení přes WebSocket
+                    WebSocketConnections.broadcast("""{"type":"rental_deleted","id":$id}""")
+
                     call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
                 } else {
                     call.respond(HttpStatusCode.NotFound, mapOf("error" to "Rental not found"))

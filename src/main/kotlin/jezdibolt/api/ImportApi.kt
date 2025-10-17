@@ -16,22 +16,6 @@ import org.jetbrains.exposed.sql.SortOrder
 import java.io.ByteArrayOutputStream
 import jezdibolt.model.ImportBatches
 
-// DTO pro výsledek importu (serializovatelný)
-@Serializable
-data class ImportResultDto(
-    val imported: Int,
-    val skipped: Int,
-    val batchId: Int
-)
-
-// odpověď pro POST /import/bolt
-@Serializable
-data class ImportResponse(
-    val importResult: ImportResultDto,
-    val filename: String
-)
-
-// odpověď pro GET /import/list
 @Serializable
 data class ImportBatchDto(
     val id: Int,
@@ -43,6 +27,7 @@ data class ImportBatchDto(
 fun Application.importApi() {
     routing {
         route("/import") {
+
             post("/bolt") {
                 try {
                     val contentType = call.request.contentType()
@@ -79,9 +64,23 @@ fun Application.importApi() {
                     }
 
                     val service = BoltImportService()
-                    val result = service.importFiles(files)
+                    val result = service.importFiles(files) // MultiImportResult
+
+                    // ✅ Vezmeme všechny importované soubory a pošleme je klientům
+                    result.results.forEach { single ->
+                        WebSocketConnections.broadcast(
+                            """{
+                                "type": "import_completed",
+                                "filename": "${single.filename}",
+                                "batchId": ${single.batchId},
+                                "imported": ${single.imported},
+                                "skipped": ${single.skipped}
+                            }""".trimIndent()
+                        )
+                    }
 
                     call.respond(HttpStatusCode.OK, result)
+
                 } catch (e: Exception) {
                     e.printStackTrace()
                     call.respond(

@@ -1,17 +1,14 @@
 package jezdibolt.api
 
 import io.ktor.http.*
-import io.ktor.http.ContentDisposition.Companion.File
 import io.ktor.http.content.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import jezdibolt.model.Car
-import jezdibolt.model.UsersSchema
 import jezdibolt.service.CarService
 import kotlinx.serialization.Serializable
-import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
 import java.time.LocalDate
@@ -62,11 +59,13 @@ fun Application.carApi(carService: CarService = CarService()) {
     routing {
         route("/cars") {
 
+            // 🔹 všechny auta
             get {
                 val cars = carService.listCars().map { it.toDto() }
                 call.respond(HttpStatusCode.OK, cars)
             }
 
+            // 🔹 detail auta
             get("/{id}") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
@@ -79,6 +78,7 @@ fun Application.carApi(carService: CarService = CarService()) {
                 }
             }
 
+            // 🔹 vytvoření auta
             post {
                 try {
                     val req = call.receive<CarRequest>()
@@ -93,7 +93,14 @@ fun Application.carApi(carService: CarService = CarService()) {
                         city = req.city
                         notes = req.notes
                     }
+
+                    // ✅ realtime broadcast – nové auto
+                    WebSocketConnections.broadcast(
+                        """{"type":"car_created","id":${car.id.value},"licensePlate":"${car.licensePlate}"}"""
+                    )
+
                     call.respond(HttpStatusCode.Created, car.toDto())
+
                 } catch (e: Exception) {
                     e.printStackTrace()
                     call.respond(
@@ -103,6 +110,7 @@ fun Application.carApi(carService: CarService = CarService()) {
                 }
             }
 
+            // 🔹 nahrání fotky
             post("/{id}/photo") {
                 try {
                     val id = call.parameters["id"]?.toIntOrNull()
@@ -116,7 +124,6 @@ fun Application.carApi(carService: CarService = CarService()) {
                             val ext = File(part.originalFileName ?: "").extension.ifBlank { "jpg" }
                             fileName = "car_${id}.$ext"
 
-                            // zajistíme, že složka existuje
                             val uploadDir = File("uploads")
                             if (!uploadDir.exists()) uploadDir.mkdirs()
 
@@ -137,13 +144,19 @@ fun Application.carApi(carService: CarService = CarService()) {
                         car.photoUrl = "/uploads/$fileName"
                     }
 
+                    // ✅ realtime broadcast – nová fotka
+                    WebSocketConnections.broadcast(
+                        """{"type":"car_photo_updated","id":$id,"url":"/uploads/$fileName"}"""
+                    )
+
                     call.respond(HttpStatusCode.OK, mapOf("status" to "photo uploaded", "url" to "/uploads/$fileName"))
                 } catch (e: Exception) {
-                    e.printStackTrace() // 👈 logne se do konzole
+                    e.printStackTrace()
                     call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Unknown error")))
                 }
             }
 
+            // 🔹 aktualizace auta
             put("/{id}") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
@@ -160,19 +173,29 @@ fun Application.carApi(carService: CarService = CarService()) {
                     city = req.city
                     notes = req.notes
                 }
+
                 if (updated == null) {
                     call.respond(HttpStatusCode.NotFound, mapOf("error" to "Car not found"))
                 } else {
+                    // ✅ realtime broadcast – úprava auta
+                    WebSocketConnections.broadcast(
+                        """{"type":"car_updated","id":$id,"licensePlate":"${req.licensePlate}"}"""
+                    )
+
                     call.respond(HttpStatusCode.OK, updated.toDto())
                 }
             }
 
+            // 🔹 smazání auta
             delete("/{id}") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
                 val deleted = carService.deleteCar(id)
                 if (deleted) {
+                    // ✅ realtime broadcast – odstranění auta
+                    WebSocketConnections.broadcast("""{"type":"car_deleted","id":$id}""")
+
                     call.respond(HttpStatusCode.OK, mapOf("status" to "deleted"))
                 } else {
                     call.respond(HttpStatusCode.NotFound, mapOf("error" to "Car not found"))

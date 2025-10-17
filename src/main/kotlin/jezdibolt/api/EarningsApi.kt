@@ -24,6 +24,7 @@ fun Application.earningsApi() {
             @Serializable
             data class BonusRequest(val bonus: String)
 
+            // 🔹 aktualizace bonusu
             put("{id}/bonus") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
@@ -38,12 +39,16 @@ fun Application.earningsApi() {
                     }
                 }
 
+                // ✅ Realtime oznámení
+                WebSocketConnections.broadcast("""{"type":"earning_bonus_updated","id":$id,"bonus":"${bonusValue.toPlainString()}"}""")
+
                 call.respond(HttpStatusCode.OK, mapOf("status" to "bonus updated", "bonus" to bonusValue.toPlainString()))
             }
 
             @Serializable
             data class PenaltyRequest(val penalty: String)
 
+            // 🔹 aktualizace pokuty
             put("{id}/penalty") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
@@ -58,9 +63,13 @@ fun Application.earningsApi() {
                     }
                 }
 
+                // ✅ Realtime oznámení
+                WebSocketConnections.broadcast("""{"type":"earning_penalty_updated","id":$id,"penalty":"${penaltyValue.toPlainString()}"}""")
+
                 call.respond(HttpStatusCode.OK, mapOf("status" to "penalty updated", "penalty" to penaltyValue.toPlainString()))
             }
 
+            // 🔹 vyplacení (částkové nebo plné)
             put("{id}/pay") {
                 val id = call.parameters["id"]?.toIntOrNull()
                     ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid id"))
@@ -79,11 +88,9 @@ fun Application.earningsApi() {
                     val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
                     val alreadyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-                    // settlement = earnings - cashTaken + bonus - penalty - alreadyPaid
                     val settlement = earnings - cashTaken + bonus - penalty - alreadyPaid
 
                     if (amount >= settlement) {
-                        // full payment
                         BoltEarnings.update({ BoltEarnings.id eq id }) {
                             it[BoltEarnings.paid] = true
                             it[BoltEarnings.paidAt] = CurrentDateTime
@@ -91,7 +98,6 @@ fun Application.earningsApi() {
                         }
                         mapOf("status" to "fully paid", "amount" to amount.toPlainString())
                     } else {
-                        // partial payment
                         BoltEarnings.update({ BoltEarnings.id eq id }) {
                             it[BoltEarnings.partiallyPaid] = alreadyPaid + amount
                         }
@@ -102,10 +108,15 @@ fun Application.earningsApi() {
                 if (result.containsKey("error")) {
                     call.respond(HttpStatusCode.NotFound, result)
                 } else {
+                    // ✅ Realtime oznámení po výplatě
+                    val type = if (result["status"] == "fully paid") "earning_fully_paid" else "earning_partially_paid"
+                    WebSocketConnections.broadcast("""{"type":"$type","id":$id,"amount":"${result["amount"]}"}""")
+
                     call.respond(HttpStatusCode.OK, result)
                 }
             }
 
+            // 🔹 přehled importovaných výdělků podle dávky
             get("/imports/{id}") {
                 val batchIdParam = call.parameters["id"]?.toIntOrNull()
                     ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid batchId"))
@@ -130,7 +141,6 @@ fun Application.earningsApi() {
                                 )
 
                                 val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
-
                                 val settlement = earnings - cashTaken + bonus - penalty - partiallyPaid
 
                                 EarningsDto(
@@ -151,6 +161,7 @@ fun Application.earningsApi() {
                     }
                     call.respond(HttpStatusCode.OK, results)
                 } catch (e: Exception) {
+                    e.printStackTrace()
                     call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to fetch earnings data"))
                 }
             }

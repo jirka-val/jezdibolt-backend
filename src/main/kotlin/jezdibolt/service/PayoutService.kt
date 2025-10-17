@@ -3,121 +3,96 @@ package jezdibolt.service
 import jezdibolt.model.PayRates
 import jezdibolt.model.PayRules
 import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
 import org.jetbrains.exposed.sql.transactions.transaction
+
 import java.math.BigDecimal
 
 object PayoutService {
 
+    /**
+     * Vrátí celkovou odměnu podle aktuálních pravidel.
+     */
     fun calculatePayout(hours: Double, grossPerHour: Double): BigDecimal {
-        return transaction {
-            val baseRateRow = PayRates
-                .selectAll()
-                .firstOrNull { row ->
-                    val min = row[PayRates.minGross]
-                    val max = row[PayRates.maxGross]
-                    grossPerHour >= min && (max == null || grossPerHour <= max)
-                }
-
-            var rate = baseRateRow?.get(PayRates.rate) ?: 130
-
-            PayRules.selectAll().forEach { rule ->
-                when (rule[PayRules.type]) {
-                    "min_hours" -> {
-                        if (hours <= rule[PayRules.hours].toDouble()) {
-                            if (rule[PayRules.mode] == "set") {
-                                rate = rule[PayRules.adjustment]
-                            }
-                        }
-                    }
-                    "bonus_hours" -> {
-                        if (hours >= rule[PayRules.hours].toDouble()) {
-                            if (rule[PayRules.mode] == "add") {
-                                rate += rule[PayRules.adjustment]
-                            }
-                        }
-                    }
-                }
-            }
-
-            BigDecimal(rate) * BigDecimal(hours)
-        }
+        val rate = getAppliedRate(hours, grossPerHour)
+        return BigDecimal.valueOf(rate.toLong()) * BigDecimal.valueOf(hours)
     }
 
-    fun getAppliedRate(hours: Double, grossPerHour: Double): Int {
-        return transaction {
-            val baseRateRow = PayRates
-                .selectAll()
-                .firstOrNull { row ->
-                    val min = row[PayRates.minGross]
-                    val max = row[PayRates.maxGross]
-                    grossPerHour >= min && (max == null || grossPerHour <= max)
-                }
+    /**
+     * Určí hodinovou sazbu podle počtu hodin a hrubého průměru.
+     * Bere hodnoty dynamicky z DB.
+     */
+    fun getAppliedRate(hours: Double, grossPerHour: Double): Int = transaction {
+        //  Pravidla — např. pokud někdo odpracoval méně než X hodin
+        val rule = PayRules
+            .selectAll()
+            .firstOrNull { it[PayRules.type] == "under_hours" && hours < it[PayRules.hours] }
 
-            var rate = baseRateRow?.get(PayRates.rate) ?: 130
-
-            PayRules.selectAll().forEach { rule ->
-                when (rule[PayRules.type]) {
-                    "min_hours" -> {
-                        if (hours <= rule[PayRules.hours].toDouble() && rule[PayRules.mode] == "set") {
-                            rate = rule[PayRules.adjustment]
-                        }
-                    }
-                    "bonus_hours" -> {
-                        if (hours >= rule[PayRules.hours].toDouble() && rule[PayRules.mode] == "add") {
-                            rate += rule[PayRules.adjustment]
-                        }
-                    }
+        if (rule != null) {
+            return@transaction when (rule[PayRules.mode]) {
+                "set" -> rule[PayRules.adjustment] // přepíše hodnotu
+                "add" -> {
+                    val base = findRateByGross(grossPerHour) ?: 130
+                    base + rule[PayRules.adjustment]
                 }
+                else -> 130
             }
-
-            rate
         }
+
+        //  Jinak vracíme standardní sazbu podle hrubého průměru
+        return@transaction findRateByGross(grossPerHour) ?: 130
     }
 
+    /**
+     * Najde sazbu v tabulce PayRates podle hrubého průměru.
+     */
+    private fun findRateByGross(grossPerHour: Double): Int? = transaction {
+        val grossInt = grossPerHour.toInt()
+
+        //  Získáme všechny sazby
+        val allRates = PayRates.selectAll().map {
+            Triple(it[PayRates.minGross], it[PayRates.maxGross], it[PayRates.rate])
+        }
+
+        //  Najdeme první odpovídající záznam podle rozsahu
+        val matchingRate = allRates.firstOrNull { (min, max, _) ->
+            grossInt >= min && (max == null || grossInt <= max)
+        }
+
+        //  Vrátíme nalezenou sazbu
+        return@transaction matchingRate?.third
+    }
+
+    /**
+     * Naplní výchozí hodnoty (jen pokud je DB prázdná).
+     */
     fun seedPayConfig() {
         transaction {
             if (PayRates.selectAll().empty()) {
-                PayRates.insert {
-                    it[minGross] = 0
-                    it[maxGross] = 449
-                    it[rate] = 130
-                }
-                PayRates.insert {
-                    it[minGross] = 450
-                    it[maxGross] = 549
-                    it[rate] = 150
-                }
-                PayRates.insert {
-                    it[minGross] = 550
-                    it[maxGross] = 649
-                    it[rate] = 170
-                }
-                PayRates.insert {
-                    it[minGross] = 650
-                    it[maxGross] = 749
-                    it[rate] = 190
-                }
-                PayRates.insert {
-                    it[minGross] = 750
-                    it[maxGross] = null
-                    it[rate] = 210
+                PayRates.batchInsert(
+                    listOf(
+                        Triple(0, 449, 140),
+                        Triple(450, 559, 160),
+                        Triple(560, 659, 180),
+                        Triple(660, 759, 200),
+                        Triple(760, null, 220)
+                    )
+                ) { (min, max, rateValue) ->
+                    this[PayRates.minGross] = min
+                    this[PayRates.maxGross] = max
+                    this[PayRates.rate] = rateValue
                 }
             }
 
             if (PayRules.selectAll().empty()) {
-                // pravidlo: <=9 hodin → fix 130/hod
                 PayRules.insert {
-                    it[type] = "min_hours"
-                    it[hours] = 9
+                    it[type] = "under_hours"
+                    it[hours] = 35
                     it[adjustment] = 130
                     it[mode] = "set"
-                }
-                // pravidlo: >=40 hodin → +10/hod
-                PayRules.insert {
-                    it[type] = "bonus_hours"
-                    it[hours] = 40
-                    it[adjustment] = 10
-                    it[mode] = "add"
                 }
             }
         }

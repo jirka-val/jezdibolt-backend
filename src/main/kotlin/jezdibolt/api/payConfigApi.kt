@@ -10,12 +10,8 @@ import jezdibolt.model.PayRules
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.*
 
-// DTOs
 @Serializable
 data class PayRuleDto(
     val id: Int,
@@ -35,8 +31,10 @@ data class PayRateDto(
 
 fun Application.payConfigApi() {
     routing {
-        // PAY_RULES
+
+        // ================= PAY_RULES =================
         route("/payrules") {
+
             get {
                 val rules = transaction {
                     PayRules.selectAll().map {
@@ -54,24 +52,17 @@ fun Application.payConfigApi() {
 
             put("{id}") {
                 val id = call.parameters["id"]?.toIntOrNull()
-                if (id == null) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
-                    return@put
-                }
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
                 val bodyText = call.receiveText()
-                //println("👉 RAW BODY: $bodyText") // LOG
 
                 try {
                     val json = Json.parseToJsonElement(bodyText) as JsonObject
-                    //println("👉 Parsed JSON: $json") // LOG
 
                     transaction {
                         PayRules.update({ PayRules.id eq id }) { row ->
                             json.forEach { (field, jsonElement) ->
                                 val value = (jsonElement as JsonPrimitive).content
-                                //println("   • updating $field = $value")
-
                                 when (field) {
                                     "hours" -> row[PayRules.hours] = value.toInt()
                                     "adjustment" -> row[PayRules.adjustment] = value.toInt()
@@ -81,6 +72,10 @@ fun Application.payConfigApi() {
                             }
                         }
                     }
+
+                    // ✅ Notifikace přes WebSocket
+                    WebSocketConnections.broadcast("""{"type":"payrule_updated","id":$id}""")
+
                     call.respond(HttpStatusCode.OK, mapOf("success" to true))
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -89,8 +84,9 @@ fun Application.payConfigApi() {
             }
         }
 
-        // PAY_RATES
+        // ================= PAY_RATES =================
         route("/payrates") {
+
             get {
                 val rates = transaction {
                     PayRates.selectAll().map {
@@ -107,24 +103,17 @@ fun Application.payConfigApi() {
 
             put("{id}") {
                 val id = call.parameters["id"]?.toIntOrNull()
-                if (id == null) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
-                    return@put
-                }
+                    ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
                 val bodyText = call.receiveText()
-               // println("👉 RAW BODY: $bodyText") // LOG
 
                 try {
                     val json = Json.parseToJsonElement(bodyText) as JsonObject
-                    //println("👉 Parsed JSON: $json") // LOG
 
                     transaction {
                         PayRates.update({ PayRates.id eq id }) { row ->
                             json.forEach { (field, jsonElement) ->
                                 val value = (jsonElement as JsonPrimitive).content
-                                //println("   • updating $field = $value")
-
                                 when (field) {
                                     "minGross" -> row[PayRates.minGross] = value.toInt()
                                     "maxGross" -> row[PayRates.maxGross] = value.toIntOrNull()
@@ -133,13 +122,16 @@ fun Application.payConfigApi() {
                             }
                         }
                     }
+
+                    // ✅ Notifikace přes WebSocket
+                    WebSocketConnections.broadcast("""{"type":"payrate_updated","id":$id}""")
+
                     call.respond(HttpStatusCode.OK, mapOf("success" to true))
                 } catch (e: Exception) {
                     e.printStackTrace()
                     call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
-
         }
     }
 }

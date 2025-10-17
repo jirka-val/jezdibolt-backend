@@ -28,4 +28,5 @@ fun Application.configureRouting() {
     carAssignmentApi()
     penaltyApi()
     historyApi()
+    webSocketApi()
 }

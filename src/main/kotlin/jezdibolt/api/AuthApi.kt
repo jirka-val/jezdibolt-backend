@@ -30,11 +30,13 @@ fun Application.authApi() {
             )
 
             post("/login") {
-                val body = call.receive<LoginRequest>()
+                val body = runCatching { call.receive<LoginRequest>() }.getOrNull()
+                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body"))
 
                 val user = transaction {
-                    UsersSchema.selectAll()
-                        .where { UsersSchema.email eq body.email }
+                    UsersSchema
+                        .selectAll()
+                        .where { UsersSchema.email eq body.email.lowercase() }
                         .singleOrNull()
                 }
 
@@ -44,8 +46,6 @@ fun Application.authApi() {
                 }
 
                 val passwordHash = user[UsersSchema.passwordHash]
-                val role = user[UsersSchema.role]
-
                 if (!PasswordHelper.verify(body.password, passwordHash)) {
                     call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid credentials"))
                     return@post
@@ -53,20 +53,33 @@ fun Application.authApi() {
 
                 val userId = user[UsersSchema.id].value
                 val name = user[UsersSchema.name]
+                val role = user[UsersSchema.role]
+                val email = user[UsersSchema.email]
 
                 // stejné hodnoty jako v configureSecurity()
-                val jwtSecret = "super-secret"
-                val jwtIssuer = "jezdibolt"
-                val jwtAudience = "jezdibolt-users"
+                val jwtSecret = System.getenv("JWT_SECRET") ?: "default-secret"
+                val jwtIssuer = System.getenv("JWT_ISSUER")
+                val jwtAudience = System.getenv("JWT_AUDIENCE")
+
+                val expirationTime = 1000L * 60L * 60L * 10L // 10 hodin
 
                 val token = JWT.create()
                     .withIssuer(jwtIssuer)
                     .withAudience(jwtAudience)
                     .withClaim("userId", userId)
-                    .withClaim("email", body.email)
+                    .withClaim("email", email)
                     .withClaim("role", role)
-                    .withExpiresAt(Date(System.currentTimeMillis() + 36_000_00)) // 10 hodin
+                    .withIssuedAt(Date())
+                    .withExpiresAt(Date(System.currentTimeMillis() + expirationTime))
                     .sign(Algorithm.HMAC256(jwtSecret))
+
+                // ✅ realtime event – přihlášení
+                WebSocketConnections.broadcast(
+                    """{"type":"user_logged_in","userId":$userId,"role":"$role","name":"$name"}"""
+                )
+
+                // ✅ možnost pozdějšího logování do historie (pokud přidáš HistoryLogger)
+                // HistoryLogger.logAction(userId, "login", "user", userId, "Uživatel se přihlásil")
 
                 call.respond(
                     LoginResponse(

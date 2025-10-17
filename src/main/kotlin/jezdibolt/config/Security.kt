@@ -2,14 +2,19 @@ package jezdibolt.config
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import io.github.cdimascio.dotenv.dotenv
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
 
 fun Application.configureSecurity() {
-    val secret = "super-secret" // stejné jako v authApi
-    val issuer = "jezdibolt"    // stejné jako v authApi
-    val audience = "jezdibolt-users"
+    val dotenv = dotenv {
+        ignoreIfMissing = true
+    }
+
+    val secret = dotenv["JWT_SECRET"] ?: "default-secret"
+    val issuer = dotenv["JWT_ISSUER"] ?: "jezdibolt"
+    val audience = dotenv["JWT_AUDIENCE"] ?: "jezdibolt-users"
     val realm = "Access to Jezdibolt"
 
     install(Authentication) {
@@ -25,14 +30,14 @@ fun Application.configureSecurity() {
             )
 
             validate { credential ->
-                val userId = credential.payload.getClaim("userId").asInt() // 👈 musí být "userId"
+                val userId = credential.payload.getClaim("userId").asInt()
                 val role = credential.payload.getClaim("role").asString()
                 if (userId != null && role != null) {
                     JWTPrincipal(credential.payload)
-                } else {
-                    null
-                }
+                } else null
             }
         }
     }
+
+    log.info("✅ JWT security initialized (issuer=$issuer, audience=$audience)")
 }

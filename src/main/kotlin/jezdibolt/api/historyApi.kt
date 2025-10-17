@@ -11,6 +11,8 @@ import org.jetbrains.exposed.sql.transactions.transaction
 fun Application.historyApi() {
     routing {
         route("/history") {
+
+            // 📜 Vrací historii (s stránkováním)
             get {
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
                 val size = call.request.queryParameters["size"]?.toIntOrNull() ?: 20
@@ -23,7 +25,8 @@ fun Application.historyApi() {
                         HistoryLogs
                             .selectAll()
                             .orderBy(HistoryLogs.timestamp, SortOrder.DESC)
-                            .limit(count = size).offset(start = offset)
+                            .limit(count = size)
+                            .offset(start = offset)
                             .map { row ->
                                 HistoryDto(
                                     id = row[HistoryLogs.id].value,
@@ -45,7 +48,9 @@ fun Application.historyApi() {
                             "logs" to logs
                         )
                     )
+
                 } catch (e: Exception) {
+                    e.printStackTrace()
                     call.respond(
                         HttpStatusCode.InternalServerError,
                         mapOf("error" to "Nepodařilo se načíst historii")
