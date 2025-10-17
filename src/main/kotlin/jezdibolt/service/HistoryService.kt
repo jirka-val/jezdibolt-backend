@@ -3,7 +3,6 @@ package jezdibolt.service
 import jezdibolt.model.HistoryLogs
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.transactions.transaction
-import java.time.LocalDateTime
 
 object HistoryService {
     fun log(
@@ -15,7 +14,6 @@ object HistoryService {
     ) {
         transaction {
             HistoryLogs.insert {
-                it[timestamp] = LocalDateTime.now()
                 it[HistoryLogs.adminId] = adminId
                 it[HistoryLogs.action] = action
                 it[HistoryLogs.entity] = entity

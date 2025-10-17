@@ -1,18 +1,19 @@
 package jezdibolt.api
 
-import com.auth0.jwt.JWT
-import com.auth0.jwt.algorithms.Algorithm
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import jezdibolt.config.JwtConfig
 import jezdibolt.model.UsersSchema
 import jezdibolt.service.PasswordHelper
 import kotlinx.serialization.Serializable
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
-import java.util.*
+import java.time.LocalDateTime
 
 fun Application.authApi() {
     routing {
@@ -26,12 +27,16 @@ fun Application.authApi() {
                 val id: Int,
                 val name: String,
                 val role: String,
-                val token: String
+                val token: String,
+                val companyId: Int?
             )
 
             post("/login") {
                 val body = runCatching { call.receive<LoginRequest>() }.getOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body"))
+                    ?: return@post call.respond(
+                        HttpStatusCode.BadRequest,
+                        mapOf("error" to "Invalid request body")
+                    )
 
                 val user = transaction {
                     UsersSchema
@@ -55,40 +60,39 @@ fun Application.authApi() {
                 val name = user[UsersSchema.name]
                 val role = user[UsersSchema.role]
                 val email = user[UsersSchema.email]
+                val companyId = user[UsersSchema.companyId]?.value
 
-                // stejné hodnoty jako v configureSecurity()
-                val jwtSecret = System.getenv("JWT_SECRET") ?: "default-secret"
-                val jwtIssuer = System.getenv("JWT_ISSUER")
-                val jwtAudience = System.getenv("JWT_AUDIENCE")
-
-                val expirationTime = 1000L * 60L * 60L * 10L // 10 hodin
-
-                val token = JWT.create()
-                    .withIssuer(jwtIssuer)
-                    .withAudience(jwtAudience)
-                    .withClaim("userId", userId)
-                    .withClaim("email", email)
-                    .withClaim("role", role)
-                    .withIssuedAt(Date())
-                    .withExpiresAt(Date(System.currentTimeMillis() + expirationTime))
-                    .sign(Algorithm.HMAC256(jwtSecret))
-
-                // ✅ realtime event – přihlášení
-                WebSocketConnections.broadcast(
-                    """{"type":"user_logged_in","userId":$userId,"role":"$role","name":"$name"}"""
+                // ✅ Vygeneruj token pomocí centrální JwtConfig
+                val token = JwtConfig.generateToken(
+                    userId = userId,
+                    email = email,
+                    role = role,
+                    companyId = companyId
                 )
 
-                // ✅ možnost pozdějšího logování do historie (pokud přidáš HistoryLogger)
-                // HistoryLogger.logAction(userId, "login", "user", userId, "Uživatel se přihlásil")
+                // ✅ Volitelně: realtime event (pokud máš WebSocketConnections)
+                try {
+                    WebSocketConnections.broadcast(
+                        """{"type":"user_logged_in","userId":$userId,"role":"$role","name":"$name"}"""
+                    )
+                } catch (e: Exception) {
+                    call.application.log.warn("WebSocket broadcast failed: ${e.message}")
+                }
+
+                // ✅ Volitelně: logování přihlášení
+                // HistoryLogger.logAction(userId, "login", "User", userId, "Uživatel se přihlásil")
 
                 call.respond(
                     LoginResponse(
                         id = userId,
                         name = name,
                         role = role,
-                        token = token
+                        token = token,
+                        companyId = companyId
                     )
                 )
+
+                call.application.log.info("👤 User $email ($role) logged in at ${LocalDateTime.now()}")
             }
         }
     }
