@@ -10,9 +10,6 @@ import io.ktor.server.auth.jwt.*
 import io.ktor.server.auth.*
 import io.ktor.server.response.*
 
-/**
- * Uchovává seznam všech aktivních WebSocket připojení
- */
 object WebSocketConnections {
     private val connections = Collections.synchronizedSet<DefaultWebSocketServerSession?>(LinkedHashSet())
 
@@ -37,14 +34,13 @@ object WebSocketConnections {
     }
 }
 
-/**
- * WebSocket endpoint `/updates`
- * Připojení musí být autentizováno přes JWT (auth-jwt)
- */
-
 fun Application.webSocketApi() {
     routing {
-        authenticate("auth-jwt") {
+
+        /**
+         * 🟢 WS endpoint s autentizací přes query param ?token=...
+         */
+        authenticate("auth-jwt-query") {
             webSocket("/updates") {
                 val principal = call.principal<JWTPrincipal>()
                 val userId = principal?.getClaim("userId", Int::class)
@@ -67,7 +63,7 @@ fun Application.webSocketApi() {
             }
         }
 
-        //  Pomocný endpoint pro testování WebSocket broadcastu
+        // Pomocný endpoint pro test
         get("/test-broadcast") {
             val message = "🟢 Test update from server at ${System.currentTimeMillis()}"
             WebSocketConnections.broadcast(message)
