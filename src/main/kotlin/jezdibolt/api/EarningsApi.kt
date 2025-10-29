@@ -95,7 +95,6 @@ fun Application.earningsApi() {
                     call.respond(HttpStatusCode.OK, mapOf("status" to "penalty updated", "penalty" to penaltyValue.toPlainString()))
                 }
 
-                // 🔹 vyplacení (částkové nebo plné)
                 put("{id}/pay") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
                     val id = call.parameters["id"]?.toIntOrNull()
@@ -105,30 +104,45 @@ fun Application.earningsApi() {
                     val amount = body?.amount?.toBigDecimalOrNull()
                         ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing or invalid amount"))
 
-                    val result: Map<String, String> = transaction {
+                    val result = transaction {
                         val row = BoltEarnings.selectAll().where { BoltEarnings.id eq id }.singleOrNull()
                             ?: return@transaction mapOf("error" to "Earning not found")
 
-                        val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
-                        val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
-                        val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
-                        val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
-                        val alreadyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
+                        val currentSettlement = row[BoltEarnings.settlement] ?: BigDecimal.ZERO
+                        val currentPartial = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-                        val settlement = earnings - cashTaken + bonus - penalty - alreadyPaid
+                        // 💡 Směr platby určí settlement:
+                        //  > 0 → firma platí řidiči
+                        //  < 0 → řidič platí firmě
+                        val isDriverPaying = currentSettlement < BigDecimal.ZERO
+                        val payment = amount.abs() // vždy kladná hodnota vstupu
 
-                        if (amount >= settlement) {
-                            BoltEarnings.update({ BoltEarnings.id eq id }) {
-                                it[BoltEarnings.paid] = true
-                                it[BoltEarnings.paidAt] = CurrentDateTime
-                                it[BoltEarnings.partiallyPaid] = earnings - cashTaken + bonus - penalty
-                            }
-                            mapOf("status" to "fully paid", "amount" to amount.toPlainString())
+                        // 🔹 Nový zůstatek po platbě
+                        val newSettlement = if (isDriverPaying) {
+                            currentSettlement + payment // řidič snižuje svůj dluh (z -600 -> -500)
                         } else {
+                            currentSettlement - payment // firma snižuje svůj dluh (z +600 -> +500)
+                        }
+
+                        val fullyPaid = newSettlement.abs() < BigDecimal("0.01")
+
+                        if (fullyPaid) {
+                            // 🔸 Plně zaplaceno
                             BoltEarnings.update({ BoltEarnings.id eq id }) {
-                                it[BoltEarnings.partiallyPaid] = alreadyPaid + amount
+                                it[BoltEarnings.settlement] = BigDecimal.ZERO
+                                it[BoltEarnings.paid] = true
+                                it[BoltEarnings.paidAt] = org.jetbrains.exposed.sql.javatime.CurrentDateTime
+                                it[BoltEarnings.partiallyPaid] = BigDecimal.ZERO
                             }
-                            mapOf("status" to "partially paid", "amount" to amount.toPlainString())
+                            mapOf("status" to "fully paid", "amount" to payment.toPlainString())
+                        } else {
+                            // 🔸 Částečná platba
+                            BoltEarnings.update({ BoltEarnings.id eq id }) {
+                                it[BoltEarnings.settlement] = newSettlement
+                                it[BoltEarnings.partiallyPaid] = currentPartial + payment
+                                it[BoltEarnings.paid] = false
+                            }
+                            mapOf("status" to "partially paid", "amount" to payment.toPlainString(), "newSettlement" to newSettlement.toPlainString())
                         }
                     }
 
@@ -145,7 +159,7 @@ fun Application.earningsApi() {
                             action = "PAY_EARNING",
                             entity = "BoltEarnings",
                             entityId = id,
-                            details = "Uživatel ${user.email} (${user.role}) vyplatil ${result["status"]} částku ${result["amount"]}"
+                            details = "Uživatel ${user.email} (${user.role}) provedl ${result["status"]} platbu ${result["amount"]}"
                         )
 
                         call.application.log.info("💵 ${user.email} provedl výplatu výdělku $id (${result["status"]})")
@@ -172,6 +186,7 @@ fun Application.earningsApi() {
                                     val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
                                     val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
                                     val partiallyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
+                                    val settlement = row[BoltEarnings.settlement] ?: BigDecimal.ZERO  // ✅ použij uložený stav
 
                                     val appliedRate = PayoutService.getAppliedRate(
                                         hoursWorked.toDouble(),
@@ -179,7 +194,6 @@ fun Application.earningsApi() {
                                     )
 
                                     val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
-                                    val settlement = earnings - cashTaken + bonus - penalty - partiallyPaid
 
                                     EarningsDto(
                                         id = row[BoltEarnings.id].value,
@@ -197,6 +211,7 @@ fun Application.earningsApi() {
                                     )
                                 }
                         }
+
                         call.application.log.info("📊 ${user.email} načetl výdělky z importu #$batchIdParam")
                         call.respond(HttpStatusCode.OK, results)
                     } catch (e: Exception) {
