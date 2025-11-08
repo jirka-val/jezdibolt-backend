@@ -32,6 +32,7 @@ dependencies {
     implementation("org.apache.commons:commons-csv:1.11.0")
     implementation("org.mindrot:jbcrypt:0.4")
 
+    implementation("io.ktor:ktor-server-cors-jvm:2.3.11")
 
     // --- Ktor ---
     implementation(libs.ktor.server.core)

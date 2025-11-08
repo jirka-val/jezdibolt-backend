@@ -12,7 +12,6 @@ import jezdibolt.service.PayoutService
 import jezdibolt.util.authUser
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
@@ -24,6 +23,8 @@ fun Application.earningsApi() {
     routing {
         route("/earnings") {
             authenticate("auth-jwt") {
+
+                // ... [Endpointy PUT /bonus a PUT /penalty zůstávají stejné] ...
 
                 @Serializable
                 data class BonusRequest(val bonus: String)
@@ -94,6 +95,8 @@ fun Application.earningsApi() {
                     call.application.log.info("⚠️ ${user.email} upravil pokutu pro výdělek $id na $penaltyValue")
                     call.respond(HttpStatusCode.OK, mapOf("status" to "penalty updated", "penalty" to penaltyValue.toPlainString()))
                 }
+
+                // ... [Endpoint PUT /{id}/pay zůstává stejný] ...
 
                 put("{id}/pay") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
@@ -167,52 +170,64 @@ fun Application.earningsApi() {
                     }
                 }
 
+                // ✅ --- NOVÝ ENDPOINT ---
+                // 🔹 Načte VŠECHNY nezaplacené položky napříč všemi importy
+                get("/unpaid/all") {
+                    val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    try {
+                        val results = transaction {
+                            (BoltEarnings innerJoin UsersSchema)
+                                .selectAll()
+                                // KLÍČOVÝ FILTR:
+                                // paid = false NEBO je tam částečná platba
+                                .where { (BoltEarnings.paid eq false) or (BoltEarnings.partiallyPaid greater BigDecimal.ZERO) }
+                                .orderBy(BoltEarnings.id, SortOrder.DESC)
+                                .map { row ->
+                                    mapRowToEarningsDto(row) // Použijeme sdílenou mapovací funkci
+                                }
+                        }
+
+                        call.application.log.info("📊 ${user.email} načetl VŠECHNY nezaplacené výdělky (${results.size} položek)")
+                        call.respond(HttpStatusCode.OK, results)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to fetch all unpaid earnings data"))
+                    }
+                }
+
+                // ✅ --- VYLEPŠENÝ ENDPOINT ---
                 // 🔹 přehled importovaných výdělků podle dávky
                 get("/imports/{id}") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
                     val batchIdParam = call.parameters["id"]?.toIntOrNull()
                         ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid batchId"))
 
+                    // ✅ Čte query parametr ?paid=...
+                    val paidFilter = call.request.queryParameters["paid"]
+
                     try {
                         val results = transaction {
-                            (BoltEarnings innerJoin UsersSchema)
+                            val query = (BoltEarnings innerJoin UsersSchema)
                                 .selectAll()
                                 .where { BoltEarnings.batchId eq batchIdParam }
-                                .map { row ->
-                                    val grossTotal = row[BoltEarnings.grossTotal] ?: BigDecimal.ZERO
-                                    val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
-                                    val hoursWorked = row[BoltEarnings.hoursWorked] ?: BigDecimal.ZERO
-                                    val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
-                                    val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
-                                    val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
-                                    val partiallyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
-                                    val settlement = row[BoltEarnings.settlement] ?: BigDecimal.ZERO  // ✅ použij uložený stav
 
-                                    val appliedRate = PayoutService.getAppliedRate(
-                                        hoursWorked.toDouble(),
-                                        hourlyGross.toDouble()
-                                    )
-
-                                    val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
-
-                                    EarningsDto(
-                                        id = row[BoltEarnings.id].value,
-                                        userName = row[UsersSchema.name],
-                                        email = row[UsersSchema.email],
-                                        hoursWorked = hoursWorked.toDouble(),
-                                        grossPerHour = appliedRate,
-                                        earnings = earnings.toPlainString(),
-                                        cashTaken = cashTaken.toPlainString(),
-                                        bonus = bonus.toPlainString(),
-                                        penalty = penalty.toPlainString(),
-                                        partiallyPaid = partiallyPaid.toPlainString(),
-                                        settlement = settlement.toPlainString(),
-                                        paid = row[BoltEarnings.paid]
-                                    )
+                            // ✅ Dynamicky přidá filtr podle ?paid=...
+                            when (paidFilter) {
+                                "false" -> {
+                                    query.andWhere { (BoltEarnings.paid eq false) or (BoltEarnings.partiallyPaid greater BigDecimal.ZERO) }
                                 }
+                                "true" -> {
+                                    query.andWhere { BoltEarnings.paid eq true }
+                                }
+                            }
+
+                            query.map { row ->
+                                mapRowToEarningsDto(row) // Použijeme sdílenou mapovací funkci
+                            }
                         }
 
-                        call.application.log.info("📊 ${user.email} načetl výdělky z importu #$batchIdParam")
+                        call.application.log.info("📊 ${user.email} načetl výdělky z importu #$batchIdParam (filtr: $paidFilter)")
                         call.respond(HttpStatusCode.OK, results)
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -224,9 +239,47 @@ fun Application.earningsApi() {
     }
 }
 
+/**
+ * ✅ NOVÁ SDÍLENÁ FUNKCE
+ * Pomocná funkce pro mapování řádku z DB na EarningsDto.
+ * Zabraňuje duplikaci kódu mezi /unpaid/all a /imports/{id}
+ */
+private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
+    val hoursWorked = row[BoltEarnings.hoursWorked] ?: BigDecimal.ZERO
+    val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
+    val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
+    val bonus = row[BoltEarnings.bonus] ?: BigDecimal.ZERO
+    val penalty = row[BoltEarnings.penalty] ?: BigDecimal.ZERO
+    val partiallyPaid = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
+    val settlement = row[BoltEarnings.settlement] ?: BigDecimal.ZERO
+    val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
+
+    val appliedRate = PayoutService.getAppliedRate(
+        hoursWorked.toDouble(),
+        hourlyGross.toDouble()
+    )
+
+    return EarningsDto(
+        id = row[BoltEarnings.id].value,
+        batchId = row[BoltEarnings.batchId].value, // ✅ PŘIDÁNO batchId
+        userName = row[UsersSchema.name],
+        email = row[UsersSchema.email],
+        hoursWorked = hoursWorked.toDouble(),
+        grossPerHour = appliedRate,
+        earnings = earnings.toPlainString(),
+        cashTaken = cashTaken.toPlainString(),
+        bonus = bonus.toPlainString(),
+        penalty = penalty.toPlainString(),
+        partiallyPaid = partiallyPaid.toPlainString(),
+        settlement = settlement.toPlainString(),
+        paid = row[BoltEarnings.paid]
+    )
+}
+
 @Serializable
 data class EarningsDto(
     val id: Int,
+    val batchId: Int, // ✅ PŘIDÁNO - Klíčové pro seskupení na frontendu
     val userName: String,
     val email: String,
     val hoursWorked: Double,

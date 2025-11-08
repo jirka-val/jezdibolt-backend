@@ -25,6 +25,10 @@ fun Application.configureHTTP() {
         allowHeader(HttpHeaders.Authorization)
         allowHeader("MyCustomHeader")
 
+        // ✅ PŘIDEJTE TYTO DVA ŘÁDKY:
+        allowHeader("sentry-trace")
+        allowHeader("baggage")
+
         // pro dev klidně povolit všechno
         anyHost()
         //  pro produkci bys sem měl dát konkrétní origin, např.:
