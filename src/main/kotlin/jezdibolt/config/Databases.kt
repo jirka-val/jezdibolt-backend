@@ -49,7 +49,7 @@ fun Application.configureDatabases() {
             SchemaUtils.createMissingTablesAndColumns(
                 UsersSchema, ImportBatches, BoltEarnings,
                 PayRates, PayRules, Cars, RentalRecords,
-                CarAssignments, Penalties, HistoryLogs
+                CarAssignments, Penalties, HistoryLogs, EarningAdjustments
             )
         }
     } else {

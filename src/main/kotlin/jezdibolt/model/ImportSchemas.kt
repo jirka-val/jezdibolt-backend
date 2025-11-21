@@ -46,5 +46,23 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
     }
 }
 
+object EarningAdjustments : IntIdTable("earning_adjustments") {
+    // Vazba na hlavní výdělek (pokud se smaže výdělek, smažou se i bonusy)
+    val earningId = reference("earning_id", BoltEarnings, onDelete = ReferenceOption.CASCADE)
 
+    // Typ: "BONUS" nebo "PENALTY"
+    val type = varchar("type", 20)
+
+    // Kategorie: "fuel", "wash", "damage", "other"...
+    val category = varchar("category", 50)
+
+    // Částka položky
+    val amount = decimal("amount", 12, 2)
+
+    // Volitelná poznámka
+    val note = text("note").nullable()
+
+    // Čas vytvoření
+    val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
+}
 
