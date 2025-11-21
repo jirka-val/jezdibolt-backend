@@ -47,9 +47,22 @@ fun Application.configureDatabases() {
     if (isDev || isTest) {
         transaction(db) {
             SchemaUtils.createMissingTablesAndColumns(
-                UsersSchema, ImportBatches, BoltEarnings,
-                PayRates, PayRules, Cars, RentalRecords,
-                CarAssignments, Penalties, HistoryLogs, EarningAdjustments
+                UsersSchema,
+                ImportBatches,
+                BoltEarnings,
+                PayRates,
+                PayRules,
+                Cars,
+                RentalRecords,
+                CarAssignments,
+                Penalties,
+                HistoryLogs,
+                EarningAdjustments,
+                Companies,
+                PermissionDefinitions,
+                UserPermissions,
+                UserCompanyAccess,
+                UserCityAccess
             )
         }
     } else {
