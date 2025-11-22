@@ -14,6 +14,7 @@ import java.util.Locale
 import java.nio.charset.Charset
 import org.apache.commons.csv.CSVFormat
 import org.apache.commons.csv.CSVParser
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -63,6 +64,12 @@ class BoltImportService {
         val wb = XSSFWorkbook(ByteArrayInputStream(bytes))
         val sheet = wb.getSheetAt(0) ?: error("Sheet1 nenalezen")
 
+        // 🏢 Získání nebo vytvoření firmy (pro vazbu na uživatele)
+        // ✅ OPRAVA: Explicitní transakce a získání ID firmy
+        val companyId = transaction {
+            findOrCreateCompany(company, city)
+        }
+
         val batchId = transaction {
             ImportBatches.insertAndGetId {
                 it[ImportBatches.filename] = filename
@@ -107,7 +114,8 @@ class BoltImportService {
                 val uniqId   = row.getCell(COL_UNIQ_ID)?.stringValue()
                 val contact  = COL_CONTACT?.let { row.getCell(it)?.stringValue()?.ifBlank { "" } }
 
-                val userId = findOrCreateUserByEmail(email, name, contact)
+                // 🔗 Předáváme companyId pro přiřazení uživatele k firmě
+                val userId = findOrCreateUserByEmail(email, name, contact, companyId)
 
                 if (!uniqId.isNullOrBlank()) {
                     val exists = BoltEarnings
@@ -203,6 +211,11 @@ class BoltImportService {
         var imported = 0
         var skipped = 0
 
+        // 🏢 Získání nebo vytvoření firmy
+        val companyId = transaction {
+            findOrCreateCompany(company, city)
+        }
+
         val batchId = transaction {
             ImportBatches.insertAndGetId {
                 it[ImportBatches.filename] = filename
@@ -222,7 +235,8 @@ class BoltImportService {
                 val uniqId   = record.get(COL_UNIQ_ID)
                 val contact  = COL_CONTACT?.let { record.get(it) }
 
-                val userId = findOrCreateUserByEmail(email, name, contact)
+                // 🔗 Předáváme companyId
+                val userId = findOrCreateUserByEmail(email, name, contact, companyId)
 
                 if (!uniqId.isNullOrBlank()) {
                     val exists = BoltEarnings
@@ -306,9 +320,42 @@ class BoltImportService {
         return company.trim() to city
     }
 
-    private fun findOrCreateUserByEmail(email: String, nameOrNull: String?, contactOrNull: String?): EntityID<Int> {
+    /**
+     * Najde nebo vytvoří firmu v tabulce Companies.
+     * 🛠 OPRAVA: Použito selectAll().andWhere() místo select(), aby se předešlo
+     * konfliktům při kompilaci a chybám s načítáním sloupců.
+     */
+    private fun findOrCreateCompany(companyName: String, cityName: String?): EntityID<Int> {
+        val existingId = Companies
+            .selectAll()
+            .andWhere { Companies.name eq companyName }
+            .map { it[Companies.id] } // Bezpečně vytáhneme ID z celého řádku
+            .singleOrNull()
+
+        return if (existingId != null) {
+            existingId
+        } else {
+            Companies.insertAndGetId {
+                it[name] = companyName
+                it[city] = cityName
+            }
+        }
+    }
+
+    /**
+     * Najde nebo vytvoří uživatele a přiřadí ho k firmě.
+     */
+    private fun findOrCreateUserByEmail(
+        email: String,
+        nameOrNull: String?,
+        contactOrNull: String?,
+        companyId: EntityID<Int> // 🆕 Přidáno companyId
+    ): EntityID<Int> {
         val existing = UsersSchema.selectAll().where { UsersSchema.email eq email }.singleOrNull()
-        if (existing != null) return existing[UsersSchema.id]
+        if (existing != null) {
+            // Pokud uživatel existuje, vracíme jeho ID.
+            return existing[UsersSchema.id]
+        }
 
         val defaultPassword = "Default123"
         val hashed = org.mindrot.jbcrypt.BCrypt.hashpw(defaultPassword, org.mindrot.jbcrypt.BCrypt.gensalt())
@@ -319,6 +366,7 @@ class BoltImportService {
             it[UsersSchema.contact] = contactOrNull ?: ""
             it[UsersSchema.role] = "driver"
             it[UsersSchema.passwordHash] = hashed
+            it[UsersSchema.companyId] = companyId // 🆕 Uložíme vazbu na firmu
         }
     }
 

@@ -2,6 +2,7 @@ package jezdibolt.model
 
 import kotlinx.serialization.Serializable
 
+// To co vracíme na FE (bez hesla)
 @Serializable
 data class UserDTO(
     val id: Int? = null,
@@ -13,12 +14,35 @@ data class UserDTO(
     val companyName: String? = null
 )
 
+// 🆕 To co posílá FE při vytváření (s heslem)
+@Serializable
+data class CreateUserRequest(
+    val name: String,
+    val email: String,
+    val password: String, // 🔐 Heslo je povinné
+    val contact: String? = null,
+    val role: String,     // např. "admin", "driver"
+    val companyId: Int? = null
+)
+
+// 🆕 To co posílá FE při úpravě (heslo je volitelné)
+@Serializable
+data class UpdateUserRequest(
+    val name: String,
+    val email: String,
+    val contact: String? = null,
+    val role: String,
+    val companyId: Int? = null,
+    val password: String? = null // 🔐 Pokud je vyplněné, změníme ho
+)
+
+// ... (UserWithRightsDto a UpdatePermissionsRequest nechej jak jsou) ...
 @Serializable
 data class UserWithRightsDto(
     val user: UserDTO,
-    val permissions: List<String>,       // ["VIEW_CARS", "EDIT_USERS"]
-    val accessibleCompanyIds: List<Int>, // [1, 2] - Firmy, které smí vidět
-    val accessibleCities: List<String>   // ["Prague"] - Města, která smí vidět
+    val permissions: List<String>,
+    val accessibleCompanyIds: List<Int>,
+    val accessibleCities: List<String>
 )
 
 @Serializable

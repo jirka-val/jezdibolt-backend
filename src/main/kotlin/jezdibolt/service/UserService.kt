@@ -33,7 +33,39 @@ class UserService(
         return userRepository.getAllFiltered(allowedCities, allowedCompanies)
     }
 
-    fun createUser(user: UserDTO): UserDTO = userRepository.create(user)
+    // 🆕 Create s hashováním
+    fun createUser(req: CreateUserRequest): UserDTO {
+        // Hashujeme heslo
+        val hash = PasswordHelper.hash(req.password)
+
+        return userRepository.create(
+            name = req.name,
+            email = req.email,
+            passwordHash = hash,
+            contact = req.contact,
+            role = req.role,
+            companyId = req.companyId
+        )
+    }
+
+    // 🆕 Update s volitelným hashováním
+    fun updateUser(id: Int, req: UpdateUserRequest): Boolean {
+        val hash = if (!req.password.isNullOrBlank()) {
+            PasswordHelper.hash(req.password)
+        } else {
+            null
+        }
+
+        return userRepository.update(
+            id = id,
+            name = req.name,
+            email = req.email,
+            contact = req.contact,
+            role = req.role,
+            companyId = req.companyId,
+            passwordHash = hash
+        )
+    }
 
     /**
      * Ověří, zda má uživatel konkrétní funkční oprávnění (např. "VIEW_USERS")

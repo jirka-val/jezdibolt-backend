@@ -8,6 +8,7 @@ import jezdibolt.config.*
 import jezdibolt.service.PayoutService
 import jezdibolt.service.UserSeeder
 import jezdibolt.service.PayoutService.seedPayConfig
+import jezdibolt.service.PermissionSeeder
 import kotlin.time.Duration.Companion.seconds
 
 fun main(args: Array<String>) {
@@ -33,5 +34,6 @@ fun Application.module() {
     configureRouting()
 
     UserSeeder.seedOwner()
+    PermissionSeeder.seed()
     PayoutService.seedPayConfig()
 }
