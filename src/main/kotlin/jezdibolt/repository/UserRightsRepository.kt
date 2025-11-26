@@ -37,7 +37,6 @@ class UserRightsRepository {
     }
 
     fun updatePermissions(targetUserId: Int, codes: List<String>) = transaction {
-        // ✅ OPRAVA: Místo "it.userId" voláme "UserPermissions.userId"
         UserPermissions.deleteWhere {
             UserPermissions.userId eq EntityID(targetUserId, UsersSchema)
         }
@@ -51,7 +50,6 @@ class UserRightsRepository {
     }
 
     fun updateAccess(targetUserId: Int, companyIds: List<Int>, cities: List<String>) = transaction {
-        // ✅ OPRAVA: Místo "it.userId" voláme "UserCompanyAccess.userId"
         UserCompanyAccess.deleteWhere {
             UserCompanyAccess.userId eq EntityID(targetUserId, UsersSchema)
         }
@@ -63,7 +61,6 @@ class UserRightsRepository {
             }
         }
 
-        // ✅ OPRAVA: Místo "it.userId" voláme "UserCityAccess.userId"
         UserCityAccess.deleteWhere {
             UserCityAccess.userId eq EntityID(targetUserId, UsersSchema)
         }
