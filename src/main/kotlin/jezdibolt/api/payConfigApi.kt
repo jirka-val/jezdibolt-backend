@@ -9,6 +9,7 @@ import io.ktor.server.routing.*
 import jezdibolt.model.PayRates
 import jezdibolt.model.PayRules
 import jezdibolt.service.HistoryService
+import jezdibolt.service.UserService // ✅ Import UserService
 import jezdibolt.util.authUser
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
@@ -32,15 +33,19 @@ data class PayRateDto(
     val ratePerHour: Int
 )
 
-fun Application.payConfigApi() {
+fun Application.payConfigApi(userService: UserService = UserService()) {
     routing {
         authenticate("auth-jwt") {
 
-            // ================= PAY_RULES =================
             route("/payrules") {
 
                 get {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_PAY_CONFIG")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet nastavení mezd"))
+                    }
+
                     val rules = transaction {
                         PayRules.selectAll().map {
                             PayRuleDto(
@@ -58,6 +63,11 @@ fun Application.payConfigApi() {
 
                 put("{id}") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_PAY_CONFIG")) {
+                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění upravovat pravidla mezd"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
@@ -99,11 +109,15 @@ fun Application.payConfigApi() {
                 }
             }
 
-            // ================= PAY_RATES =================
             route("/payrates") {
 
                 get {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_PAY_CONFIG")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet nastavení mezd"))
+                    }
+
                     val rates = transaction {
                         PayRates.selectAll().map {
                             PayRateDto(
@@ -120,6 +134,11 @@ fun Application.payConfigApi() {
 
                 put("{id}") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_PAY_CONFIG")) {
+                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění upravovat sazby mezd"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 

@@ -10,6 +10,7 @@ import io.ktor.server.routing.*
 import jezdibolt.model.Car
 import jezdibolt.service.CarService
 import jezdibolt.service.HistoryService
+import jezdibolt.service.UserService
 import jezdibolt.util.authUser
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -58,25 +59,32 @@ data class CarRequest(
     val notes: String? = null
 )
 
-fun Application.carApi(carService: CarService = CarService()) {
+fun Application.carApi(carService: CarService = CarService(), userService: UserService = UserService()) {
     routing {
         route("/cars") {
 
-            // 🔒 Vše pod JWT ochranou
             authenticate("auth-jwt") {
 
-                // 🧾 Všechna auta
                 get {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_CARS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet auta"))
+                    }
+
                     val cars = carService.listCars().map { it.toDto() }
 
                     call.application.log.info("🚗 ${user.email} (${user.role}) requested car list")
                     call.respond(HttpStatusCode.OK, cars)
                 }
 
-                // 🧾 Detail auta
                 get("/{id}") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_CARS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet detail auta"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
@@ -89,9 +97,13 @@ fun Application.carApi(carService: CarService = CarService()) {
                     }
                 }
 
-                // 🆕 Vytvoření auta
                 post {
                     val user = call.authUser() ?: return@post call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_CARS")) {
+                        return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění přidávat auta"))
+                    }
+
                     try {
                         val req = call.receive<CarRequest>()
                         val car = carService.createCar {
@@ -106,7 +118,6 @@ fun Application.carApi(carService: CarService = CarService()) {
                             notes = req.notes
                         }
 
-                        // 🧾 Log
                         HistoryService.log(
                             adminId = user.id,
                             action = "CREATE_CAR",
@@ -131,9 +142,13 @@ fun Application.carApi(carService: CarService = CarService()) {
                     }
                 }
 
-                // 📸 Nahrání fotky
                 post("/{id}/photo") {
                     val user = call.authUser() ?: return@post call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_CARS")) {
+                        return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění upravovat auta"))
+                    }
+
                     try {
                         val id = call.parameters["id"]?.toIntOrNull()
                             ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
@@ -185,9 +200,13 @@ fun Application.carApi(carService: CarService = CarService()) {
                     }
                 }
 
-                // ✏️ Aktualizace auta
                 put("/{id}") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_CARS")) {
+                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění upravovat auta"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
@@ -223,9 +242,13 @@ fun Application.carApi(carService: CarService = CarService()) {
                     }
                 }
 
-                // Smazání auta
                 delete("/{id}") {
                     val user = call.authUser() ?: return@delete call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_CARS")) {
+                        return@delete call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění mazat auta"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 

@@ -8,13 +8,14 @@ import io.ktor.server.routing.*
 import io.ktor.http.content.*
 import io.ktor.server.auth.*
 import jezdibolt.service.BoltImportService
+import jezdibolt.service.UserService
+import jezdibolt.service.HistoryService
 import jezdibolt.util.authUser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
-import org.jetbrains.exposed.sql.SortOrder
 import java.io.ByteArrayOutputStream
 import jezdibolt.model.ImportBatches
 
@@ -26,17 +27,17 @@ data class ImportBatchDto(
     val createdAt: String
 )
 
-fun Application.importApi() {
+fun Application.importApi(userService: UserService = UserService()) {
     routing {
         route("/import") {
 
-            // 🔐 Přidáme JWT autentizaci pro import
             authenticate("auth-jwt") {
+
                 post("/bolt") {
-                    val user = call.authUser()
-                    if (user == null) {
-                        call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Unauthorized"))
-                        return@post
+                    val user = call.authUser() ?: return@post call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_IMPORT")) {
+                        return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění nahrávat importy"))
                     }
 
                     try {
@@ -63,7 +64,6 @@ fun Application.importApi() {
                                     }
                                     files.add(bytes to filename)
 
-                                    // 🧾 Logni každý soubor zvlášť (do konzole)
                                     call.application.log.info(
                                         "📦 Import file uploaded by ${user.email} (${user.role}) → $filename"
                                     )
@@ -79,10 +79,9 @@ fun Application.importApi() {
                         }
 
                         val service = BoltImportService()
-                        val result = service.importFiles(files) // MultiImportResult
+                        val result = service.importFiles(files)
 
-                        // ✅ Zapiš akci do historie
-                        jezdibolt.service.HistoryService.log(
+                        HistoryService.log(
                             adminId = user.id,
                             action = "IMPORT_BOLT",
                             entity = "ImportBatch",
@@ -90,7 +89,6 @@ fun Application.importApi() {
                             details = "Uživatel ${user.email} (${user.role}) nahrál ${files.size} soubor(ů): ${files.joinToString { it.second }}"
                         )
 
-                        // ✅ WebSocket notifikace
                         result.results.forEach { single ->
                             WebSocketConnections.broadcast(
                                 """{
@@ -119,12 +117,12 @@ fun Application.importApi() {
                     }
                 }
 
-
                 get("/list") {
-                    val user = call.authUser()
-                    if (user == null) {
-                        call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Unauthorized"))
-                        return@get
+                    val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    // Kontrola pouze na právo vidět sekci
+                    if (!userService.hasPermission(user.id, "VIEW_IMPORT")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet importy"))
                     }
 
                     val imports = transaction {

@@ -9,16 +9,21 @@ import io.ktor.server.routing.*
 import jezdibolt.model.PenaltyDTO
 import jezdibolt.service.HistoryService
 import jezdibolt.service.PenaltyService
+import jezdibolt.service.UserService // ✅ Import UserService
 import jezdibolt.util.authUser
 
-fun Application.penaltyApi(penaltyService: PenaltyService = PenaltyService()) {
+fun Application.penaltyApi(penaltyService: PenaltyService = PenaltyService(), userService: UserService = UserService()) {
     routing {
         route("/penalties") {
             authenticate("auth-jwt") {
 
-                // 🔹 Načtení pokut (volitelné filtrování podle paid=true/false)
                 get {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_PENALTIES")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet pokuty"))
+                    }
+
                     val paidParam = call.request.queryParameters["paid"]?.lowercase()
                     val paidFilter = when (paidParam) {
                         "true" -> true
@@ -32,13 +37,16 @@ fun Application.penaltyApi(penaltyService: PenaltyService = PenaltyService()) {
                     call.respond(HttpStatusCode.OK, penalties)
                 }
 
-                // 🔹 Vytvoření nové pokuty
                 post {
                     val user = call.authUser() ?: return@post call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_PENALTIES")) {
+                        return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění vytvářet pokuty"))
+                    }
+
                     val penalty = call.receive<PenaltyDTO>()
                     val created = penaltyService.createPenalty(penalty)
 
-                    // 🧾 Záznam do historie
                     HistoryService.log(
                         adminId = user.id,
                         action = "CREATE_PENALTY",
@@ -47,16 +55,19 @@ fun Application.penaltyApi(penaltyService: PenaltyService = PenaltyService()) {
                         details = "Uživatel ${user.email} (${user.role}) vytvořil pokutu ID=${created.id} pro userId=${penalty.userId}"
                     )
 
-                    // ✅ Realtime oznámení
                     WebSocketConnections.broadcast("""{"type":"penalty_created","id":${created.id}}""")
 
                     call.application.log.info("🚨 ${user.email} vytvořil pokutu #${created.id}")
                     call.respond(HttpStatusCode.Created, created)
                 }
 
-                // 🔹 Označení pokuty jako zaplacené
                 patch("{id}/pay") {
                     val user = call.authUser() ?: return@patch call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_PENALTIES")) {
+                        return@patch call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění spravovat platby pokut"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@patch call.respond(HttpStatusCode.BadRequest, "Invalid penalty ID")
 
@@ -64,7 +75,6 @@ fun Application.penaltyApi(penaltyService: PenaltyService = PenaltyService()) {
                     val success = penaltyService.markAsPaid(id, resolverId)
 
                     if (success) {
-                        // 🧾 Log
                         HistoryService.log(
                             adminId = user.id,
                             action = "PAY_PENALTY",
@@ -73,7 +83,6 @@ fun Application.penaltyApi(penaltyService: PenaltyService = PenaltyService()) {
                             details = "Uživatel ${user.email} (${user.role}) označil pokutu ID=$id jako zaplacenou"
                         )
 
-                        // ✅ Realtime notifikace
                         WebSocketConnections.broadcast("""{"type":"penalty_paid","id":$id}""")
 
                         call.application.log.info("💸 ${user.email} označil pokutu $id jako zaplacenou")

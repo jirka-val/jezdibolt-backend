@@ -32,8 +32,8 @@ fun Application.module() {
     }
 
     configureRouting()
-
-    UserSeeder.seedOwner()
     PermissionSeeder.seed()
+    UserSeeder.seedOwner()
+
     PayoutService.seedPayConfig()
 }

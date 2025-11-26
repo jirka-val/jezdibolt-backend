@@ -9,6 +9,7 @@ import io.ktor.server.routing.*
 import jezdibolt.model.ShiftType
 import jezdibolt.service.CarAssignmentService
 import jezdibolt.service.HistoryService
+import jezdibolt.service.UserService // ✅ Import UserService
 import jezdibolt.util.authUser
 import java.time.LocalDate
 import kotlinx.serialization.Serializable
@@ -40,23 +41,31 @@ data class CloseAssignmentRequest(
     val endDate: String
 )
 
-fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentService()) {
+fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentService(), userService: UserService = UserService()) {
     routing {
         route("/assignments") {
             authenticate("auth-jwt") {
 
-                // 🔹 všechny záznamy
                 get {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_ASSIGNMENTS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet přiřazení"))
+                    }
+
                     val assignments = service.listAssignments()
 
                     call.application.log.info("📋 ${user.email} (${user.role}) requested assignment list")
                     call.respond(HttpStatusCode.OK, assignments)
                 }
 
-                // 🔹 detail
                 get("/{id}") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_ASSIGNMENTS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet detail přiřazení"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
@@ -69,9 +78,13 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
                     }
                 }
 
-                // vytvoření
                 post {
                     val user = call.authUser() ?: return@post call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_ASSIGNMENTS")) {
+                        return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění vytvářet přiřazení"))
+                    }
+
                     val req = call.receive<CarAssignmentRequest>()
                     try {
                         val assignment = service.createAssignment(
@@ -82,7 +95,6 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
                             notes = req.notes
                         )
 
-                        // 🧾 Log
                         HistoryService.log(
                             adminId = user.id,
                             action = "CREATE_ASSIGNMENT",
@@ -106,9 +118,13 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
                     }
                 }
 
-                // ukončení přiřazení
                 put("/{id}/close") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_ASSIGNMENTS")) {
+                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění uzavírat přiřazení"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
@@ -134,9 +150,13 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
                     }
                 }
 
-                // vyhledání podle SPZ a data
                 get("/byCarAndDate") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_ASSIGNMENTS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění vyhledávat přiřazení"))
+                    }
+
                     val licensePlate = call.request.queryParameters["licensePlate"]
                         ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing licensePlate"))
                     val dateStr = call.request.queryParameters["date"]
@@ -153,9 +173,13 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
                     call.respond(HttpStatusCode.OK, assignments)
                 }
 
-                // aktivní pro uživatele
                 get("/active/user/{userId}") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_ASSIGNMENTS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet přiřazení"))
+                    }
+
                     val userId = call.parameters["userId"]?.toIntOrNull()
                         ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid userId"))
 
@@ -163,16 +187,24 @@ fun Application.carAssignmentApi(service: CarAssignmentService = CarAssignmentSe
                     call.respond(HttpStatusCode.OK, assignments)
                 }
 
-                // aktivní záznamy
                 get("/active") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_ASSIGNMENTS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet aktivní přiřazení"))
+                    }
+
                     val assignments = service.listActiveAssignments()
                     call.respond(HttpStatusCode.OK, assignments)
                 }
 
-                // smazání
                 delete("/{id}") {
                     val user = call.authUser() ?: return@delete call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_ASSIGNMENTS")) {
+                        return@delete call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění mazat přiřazení"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 

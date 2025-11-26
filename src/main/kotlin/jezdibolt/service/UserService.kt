@@ -33,12 +33,12 @@ class UserService(
         return userRepository.getAllFiltered(allowedCities, allowedCompanies)
     }
 
-    // 🆕 Create s hashováním
     fun createUser(req: CreateUserRequest): UserDTO {
         // Hashujeme heslo
         val hash = PasswordHelper.hash(req.password)
 
-        return userRepository.create(
+        // Vytvoříme uživatele
+        val newUser = userRepository.create(
             name = req.name,
             email = req.email,
             passwordHash = hash,
@@ -46,6 +46,12 @@ class UserService(
             role = req.role,
             companyId = req.companyId
         )
+
+        if (req.role == "admin" && newUser.id != null) {
+            rightsRepository.updatePermissions(newUser.id, listOf("VIEW_DASHBOARD"))
+        }
+
+        return newUser
     }
 
     // 🆕 Update s volitelným hashováním
@@ -102,5 +108,13 @@ class UserService(
     fun updateUserPermissions(userId: Int, req: UpdatePermissionsRequest) {
         rightsRepository.updatePermissions(userId, req.permissions)
         rightsRepository.updateAccess(userId, req.accessibleCompanyIds, req.accessibleCities)
+    }
+
+    fun getAllowedCities(userId: Int): List<String> {
+        return rightsRepository.getAllowedCities(userId)
+    }
+
+    fun getAllowedCompanies(userId: Int): List<Int> {
+        return rightsRepository.getAllowedCompanies(userId)
     }
 }

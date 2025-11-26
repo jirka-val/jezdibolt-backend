@@ -10,6 +10,7 @@ import jezdibolt.model.*
 import jezdibolt.service.EarningsService
 import jezdibolt.service.HistoryService
 import jezdibolt.service.PayoutService
+import jezdibolt.service.UserService // ✅ Přidán import
 import jezdibolt.util.authUser
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.*
@@ -34,38 +35,43 @@ data class AdjustmentRequest(
 @Serializable
 data class PayRequest(val amount: String)
 
-fun Application.earningsApi() {
+fun Application.earningsApi(userService: UserService = UserService()) {
     routing {
         route("/earnings") {
             authenticate("auth-jwt") {
 
-                // 🔹 Načtení detailů (položek) pro konkrétní earning a typ
-                // GET /earnings/123/adjustments?type=bonus
                 get("{id}/adjustments") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_EARNINGS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet výplaty"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
 
                     val typeParam = call.request.queryParameters["type"]?.uppercase()
                         ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing type (bonus/penalty)"))
 
-                    // Mapování frontendu (bonus/penalty) na DB (BONUS/PENALTY)
                     val type = if (typeParam.contains("BONUS")) "BONUS" else "PENALTY"
 
                     val items = EarningsService.getAdjustments(id, type)
                     call.respond(items)
                 }
 
-                // 🔹 Aktualizace BONUSŮ (přijímá seznam)
                 put("{id}/bonus") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) {
+                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění upravovat bonusy"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
 
                     val body = call.receive<AdjustmentRequest>()
 
                     try {
-                        // Uložíme a přepočítáme
                         EarningsService.updateAdjustments(id, "BONUS", body.items)
 
                         HistoryService.log(
@@ -76,7 +82,6 @@ fun Application.earningsApi() {
                             details = "Uživatel ${user.email} upravil bonusy (${body.items.size} položek)"
                         )
 
-                        // Notifikace pro frontend, ať si přenačte data
                         WebSocketConnections.broadcast("""{"type":"earning_updated","id":$id}""")
 
                         call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
@@ -86,16 +91,19 @@ fun Application.earningsApi() {
                     }
                 }
 
-                // 🔹 Aktualizace POKUT (přijímá seznam)
                 put("{id}/penalty") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) {
+                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění upravovat pokuty"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
 
                     val body = call.receive<AdjustmentRequest>()
 
                     try {
-                        // Uložíme a přepočítáme
                         EarningsService.updateAdjustments(id, "PENALTY", body.items)
 
                         HistoryService.log(
@@ -115,11 +123,13 @@ fun Application.earningsApi() {
                     }
                 }
 
-                // ... Zbytek souboru (endpointy /pay, /unpaid/all, /imports/{id}) nech beze změny ...
-                // (Zkopíruj sem zbytek původního souboru od `put("{id}/pay")` níže)
-
                 put("{id}/pay") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) {
+                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění provádět platby"))
+                    }
+
                     val id = call.parameters["id"]?.toIntOrNull()
                         ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid id"))
 
@@ -134,7 +144,6 @@ fun Application.earningsApi() {
                         val currentSettlement = row[BoltEarnings.settlement] ?: BigDecimal.ZERO
                         val currentPartial = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-                        // Logika platby
                         val isDriverPaying = currentSettlement < BigDecimal.ZERO
                         val payment = amount.abs()
 
@@ -151,7 +160,7 @@ fun Application.earningsApi() {
                                 it[BoltEarnings.settlement] = BigDecimal.ZERO
                                 it[BoltEarnings.paid] = true
                                 it[BoltEarnings.paidAt] = org.jetbrains.exposed.sql.javatime.CurrentDateTime
-                                it[BoltEarnings.partiallyPaid] = BigDecimal.ZERO // Reset partial? Nebo nechat historii? Záleží na logice. Zde resetujeme pro čistotu.
+                                it[BoltEarnings.partiallyPaid] = BigDecimal.ZERO // Reset partial
                             }
                             mapOf("status" to "fully paid", "amount" to payment.toPlainString())
                         } else {
@@ -175,12 +184,13 @@ fun Application.earningsApi() {
                     }
                 }
 
-                // ✅ Endpointy pro čtení (unpaid, imports) zůstávají stejné,
-                // protože čtou už předpočítaná data z BoltEarnings tabulky.
-
                 get("/unpaid/all") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
-                    // ... původní kód ...
+
+                    if (!userService.hasPermission(user.id, "VIEW_EARNINGS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet seznam výplat"))
+                    }
+
                     try {
                         val results = transaction {
                             (BoltEarnings innerJoin UsersSchema)
@@ -198,6 +208,11 @@ fun Application.earningsApi() {
 
                 get("/imports/{id}") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "VIEW_EARNINGS")) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet výplaty"))
+                    }
+
                     val batchIdParam = call.parameters["id"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
                     val paidFilter = call.request.queryParameters["paid"]
 
@@ -224,7 +239,6 @@ fun Application.earningsApi() {
     }
 }
 
-// ... (mapRowToEarningsDto a EarningsDto na konci souboru zůstávají) ...
 private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
     val hoursWorked = row[BoltEarnings.hoursWorked] ?: BigDecimal.ZERO
     val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
