@@ -33,6 +33,7 @@ fun Application.userApi(userService: UserService = UserService()) {
                     val currentUser = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
                     val id = call.parameters["id"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
 
+                    // Musí mít právo editovat uživatele
                     if (!userService.hasPermission(currentUser.id, "EDIT_USERS")) {
                         return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění spravovat práva"))
                     }
@@ -60,6 +61,8 @@ fun Application.userApi(userService: UserService = UserService()) {
                         details = "Uživatel ${currentUser.email} aktualizoval oprávnění pro uživatele ID=$id"
                     )
 
+                    WebSocketConnections.broadcast("""{"type":"user_permissions_updated","userId":$id}""")
+
                     call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                 }
 
@@ -82,12 +85,16 @@ fun Application.userApi(userService: UserService = UserService()) {
                             entityId = id,
                             details = "Uživatel ${currentUser.email} upravil uživatele ID=$id"
                         )
+
+                        WebSocketConnections.broadcast("""{"type":"user_updated","userId":$id}""")
+
                         call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                     } else {
                         call.respond(HttpStatusCode.NotFound, mapOf("error" to "User not found"))
                     }
                 }
 
+                // ➕ VYTVOŘENÍ UŽIVATELE (Admin zakládá nového)
                 post {
                     val currentUser = call.authUser() ?: return@post call.respond(HttpStatusCode.Unauthorized)
 
@@ -107,6 +114,8 @@ fun Application.userApi(userService: UserService = UserService()) {
                             entityId = created.id,
                             details = "Uživatel ${currentUser.email} vytvořil uživatele ${created.email} (${created.role})"
                         )
+
+                        WebSocketConnections.broadcast("""{"type":"user_created","userId":${created.id}}""")
 
                         call.application.log.info("✅ Uživatel vytvořen: ${created.email}")
                         call.respond(HttpStatusCode.Created, created)

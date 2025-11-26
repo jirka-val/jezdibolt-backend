@@ -43,16 +43,34 @@ class UserRepository {
         updated > 0
     }
 
-    fun getAllFiltered(allowedCities: List<String>, allowedCompanies: List<Int>): List<UserDTO> = transaction {
+    fun getAllFiltered(
+        allowedCities: List<String>,
+        allowedCompanies: List<Int>,
+        includePrivileged: Boolean
+    ): List<UserDTO> = transaction {
         val query = (UsersSchema leftJoin Companies).selectAll()
 
-        if (allowedCities.isNotEmpty() || allowedCompanies.isNotEmpty()) {
-            query.andWhere {
-                val cityCondition = if (allowedCities.isNotEmpty()) (Companies.city inList allowedCities) else Op.FALSE
-                val companyCondition = if (allowedCompanies.isNotEmpty()) (Companies.id inList allowedCompanies) else Op.FALSE
-                cityCondition or companyCondition
+        query.andWhere {
+            val conditions = mutableListOf<Op<Boolean>>()
+
+            if (allowedCities.isNotEmpty()) {
+                conditions.add(Companies.city inList allowedCities)
+            }
+            if (allowedCompanies.isNotEmpty()) {
+                conditions.add(Companies.id inList allowedCompanies)
+            }
+
+            if (includePrivileged) {
+                conditions.add(UsersSchema.role inList listOf("owner", "admin"))
+            }
+
+            if (conditions.isNotEmpty()) {
+                conditions.reduce { acc, op -> acc or op }
+            } else {
+                Op.FALSE
             }
         }
+
         query.map { mapRowToUser(it) }
     }
 

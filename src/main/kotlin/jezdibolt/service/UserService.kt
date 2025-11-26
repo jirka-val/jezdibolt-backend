@@ -2,7 +2,7 @@ package jezdibolt.service
 
 import jezdibolt.model.*
 import jezdibolt.repository.UserRepository
-import jezdibolt.repository.UserRightsRepository // Budeme potřebovat repo pro práva
+import jezdibolt.repository.UserRightsRepository
 
 class UserService(
     private val userRepository: UserRepository = UserRepository(),
@@ -13,7 +13,7 @@ class UserService(
      * Vrátí seznam uživatelů, které má `requesterId` právo vidět.
      */
     fun getAllUsers(requesterId: Int, requesterRole: String): List<UserDTO> {
-        // 1. Pokud je OWNER, vidí vše
+        // 1. Pokud je OWNER, vidí vše (beze změny)
         if (requesterRole == "owner") {
             return userRepository.getAll()
         }
@@ -22,22 +22,26 @@ class UserService(
         val allowedCities = rightsRepository.getAllowedCities(requesterId)
         val allowedCompanies = rightsRepository.getAllowedCompanies(requesterId)
 
-        // 3. Pokud nemá žádný scope (a není owner), nevidí nic (nebo jen sebe?)
-        if (allowedCities.isEmpty() && allowedCompanies.isEmpty()) {
-            // Fallback: vidí jen uživatele ze své vlastní firmy (pokud nějakou má)
-            // To bychom museli dotáhnout z Users tabulky. Pro teď vrátíme prázdno.
+        // 🆕 Zjistíme, jestli je to admin (má privilegovaný pohled na ostatní adminy)
+        val isPrivilegedViewer = requesterRole == "admin"
+
+        // 3. Pokud nemá žádný scope A NENÍ ADMIN, nevidí nic
+        if (allowedCities.isEmpty() && allowedCompanies.isEmpty() && !isPrivilegedViewer) {
             return emptyList()
         }
 
-        // 4. Filtrovaný select
-        return userRepository.getAllFiltered(allowedCities, allowedCompanies)
+        // 4. Filtrovaný select - 🛠️ ZDE BYLA CHYBA, PŘIDÁVÁME TŘETÍ PARAMETR
+        return userRepository.getAllFiltered(
+            allowedCities,
+            allowedCompanies,
+            includePrivileged = isPrivilegedViewer
+        )
     }
 
+    // 🆕 Create s hashováním
     fun createUser(req: CreateUserRequest): UserDTO {
-        // Hashujeme heslo
         val hash = PasswordHelper.hash(req.password)
 
-        // Vytvoříme uživatele
         val newUser = userRepository.create(
             name = req.name,
             email = req.email,
@@ -47,6 +51,7 @@ class UserService(
             companyId = req.companyId
         )
 
+        // Pokud zakládáme admina, dáme mu defaultně právo vidět dashboard
         if (req.role == "admin" && newUser.id != null) {
             rightsRepository.updatePermissions(newUser.id, listOf("VIEW_DASHBOARD"))
         }
@@ -73,20 +78,12 @@ class UserService(
         )
     }
 
-    /**
-     * Ověří, zda má uživatel konkrétní funkční oprávnění (např. "VIEW_USERS")
-     */
     fun hasPermission(userId: Int, permissionCode: String): Boolean {
-        // Owner má automaticky všechna práva
         val role = userRepository.getRole(userId)
         if (role == "owner") return true
-
         return rightsRepository.hasPermission(userId, permissionCode)
     }
 
-    /**
-     * Načte detail uživatele i se zakliknutými checkboxy
-     */
     fun getUserWithRights(userId: Int): UserWithRightsDto? {
         val user = userRepository.getById(userId) ?: return null
 
@@ -102,9 +99,6 @@ class UserService(
         )
     }
 
-    /**
-     * Uloží nová práva
-     */
     fun updateUserPermissions(userId: Int, req: UpdatePermissionsRequest) {
         rightsRepository.updatePermissions(userId, req.permissions)
         rightsRepository.updateAccess(userId, req.accessibleCompanyIds, req.accessibleCities)

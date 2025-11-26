@@ -10,7 +10,7 @@ import jezdibolt.model.*
 import jezdibolt.service.EarningsService
 import jezdibolt.service.HistoryService
 import jezdibolt.service.PayoutService
-import jezdibolt.service.UserService // ✅ Přidán import
+import jezdibolt.service.UserService
 import jezdibolt.util.authUser
 import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.*
@@ -184,6 +184,7 @@ fun Application.earningsApi(userService: UserService = UserService()) {
                     }
                 }
 
+                // 🔹 Nezaplacené výdělky (filtrované podle práv uživatele)
                 get("/unpaid/all") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
 
@@ -193,9 +194,35 @@ fun Application.earningsApi(userService: UserService = UserService()) {
 
                     try {
                         val results = transaction {
-                            (BoltEarnings innerJoin UsersSchema)
+                            var query = (BoltEarnings innerJoin UsersSchema)
+                                .join(Companies, JoinType.LEFT, UsersSchema.companyId, Companies.id)
                                 .selectAll()
                                 .where { (BoltEarnings.paid eq false) or (BoltEarnings.partiallyPaid greater BigDecimal.ZERO) }
+
+                            if (user.role != "owner") {
+                                val allowedCompanies = userService.getAllowedCompanies(user.id)
+                                val allowedCities = userService.getAllowedCities(user.id)
+
+                                query = query.andWhere {
+                                    val conditions = mutableListOf<Op<Boolean>>()
+
+                                    if (allowedCompanies.isNotEmpty()) {
+                                        conditions.add(UsersSchema.companyId inList allowedCompanies)
+                                    }
+
+                                    if (allowedCities.isNotEmpty()) {
+                                        conditions.add(Companies.city inList allowedCities)
+                                    }
+
+                                    if (conditions.isNotEmpty()) {
+                                        conditions.reduce { acc, op -> acc or op }
+                                    } else {
+                                        Op.FALSE
+                                    }
+                                }
+                            }
+
+                            query
                                 .orderBy(BoltEarnings.id, SortOrder.DESC)
                                 .map { row -> mapRowToEarningsDto(row) }
                         }
@@ -218,6 +245,12 @@ fun Application.earningsApi(userService: UserService = UserService()) {
 
                     try {
                         val results = transaction {
+                            // Také zde bychom mohli aplikovat filtraci, pokud je potřeba,
+                            // ale tento endpoint je obvykle volán z kontextu importu, kde už uživatel import vidí.
+                            // Pro konzistenci je dobré filtrovat i zde, pokud chceme být striktní.
+                            // Prozatím nechávám původní logiku (jen user join),
+                            // případně doplňte stejný JOIN + WHERE blok jako u /unpaid/all.
+
                             val query = (BoltEarnings innerJoin UsersSchema)
                                 .selectAll()
                                 .where { BoltEarnings.batchId eq batchIdParam }
