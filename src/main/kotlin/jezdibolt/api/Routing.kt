@@ -29,5 +29,6 @@ fun Application.configureRouting() {
     penaltyApi()
     historyApi()
     webSocketApi()
+    dashboardApi()
     companyApi()
 }
