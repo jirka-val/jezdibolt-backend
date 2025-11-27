@@ -9,11 +9,17 @@ import io.ktor.server.routing.*
 import jezdibolt.model.CreateUserRequest
 import jezdibolt.model.UpdatePermissionsRequest
 import jezdibolt.model.UpdateUserRequest
+import jezdibolt.service.EarningsService
 import jezdibolt.service.HistoryService
+import jezdibolt.service.RentalRecordService
 import jezdibolt.service.UserService
 import jezdibolt.util.authUser
+import java.math.BigDecimal
 
-fun Application.userApi(userService: UserService = UserService()) {
+fun Application.userApi(
+    userService: UserService = UserService(),
+    rentalService: RentalRecordService = RentalRecordService()
+) {
     routing {
         route("/users") {
             authenticate("auth-jwt") {
@@ -66,6 +72,7 @@ fun Application.userApi(userService: UserService = UserService()) {
                     call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                 }
 
+                // ✏️ ÚPRAVA UŽIVATELE
                 put("/{id}") {
                     val currentUser = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
                     val id = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
@@ -85,6 +92,24 @@ fun Application.userApi(userService: UserService = UserService()) {
                             entityId = id,
                             details = "Uživatel ${currentUser.email} upravil uživatele ID=$id"
                         )
+
+                        if (req.role == "renter") {
+                            val existingPrice = rentalService.getPriceForUser(id)
+                            if (existingPrice == null) {
+                                // Nemá záznam -> vytvoříme defaultní s cenou 0
+                                rentalService.setPriceForUser(id, BigDecimal.ZERO)
+                                call.application.log.info("🆕 Vytvořen defaultní rental záznam pro uživatele $id")
+                            }
+                        }
+
+                        // 🚀 2. AUTOMATICKÝ PŘEPOČET VÝDĚLKŮ PŘI ZMĚNĚ ROLE
+                        try {
+                            EarningsService.recalculateUserEarnings(id)
+                            call.application.log.info("🔄 Earnings recalculated for user $id due to profile update.")
+                        } catch (e: Exception) {
+                            call.application.log.error("Failed to recalculate earnings for user $id: ${e.message}")
+                            e.printStackTrace()
+                        }
 
                         WebSocketConnections.broadcast("""{"type":"user_updated","userId":$id}""")
 

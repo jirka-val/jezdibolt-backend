@@ -65,7 +65,6 @@ class BoltImportService {
         val sheet = wb.getSheetAt(0) ?: error("Sheet1 nenalezen")
 
         // 🏢 Získání nebo vytvoření firmy (pro vazbu na uživatele)
-        // ✅ OPRAVA: Explicitní transakce a získání ID firmy
         val companyId = transaction {
             findOrCreateCompany(company, city)
         }
@@ -160,6 +159,9 @@ class BoltImportService {
                     it[BoltEarnings.earnings]    = earnings
                     it[BoltEarnings.settlement]  = settlement
                 }
+
+                // 🚀 NOVINKA: Okamžitý přepočet (aplikace nájmu/poplatků, pokud je to Renter)
+                EarningsService.recalculateUserEarnings(userId.value)
 
                 imported++
             }
@@ -283,6 +285,9 @@ class BoltImportService {
                     it[BoltEarnings.settlement]  = settlement
                 }
 
+                // 🚀 NOVINKA: Okamžitý přepočet i pro CSV
+                EarningsService.recalculateUserEarnings(userId.value)
+
                 imported++
             }
         }
@@ -320,16 +325,11 @@ class BoltImportService {
         return company.trim() to city
     }
 
-    /**
-     * Najde nebo vytvoří firmu v tabulce Companies.
-     * 🛠 OPRAVA: Použito selectAll().andWhere() místo select(), aby se předešlo
-     * konfliktům při kompilaci a chybám s načítáním sloupců.
-     */
     private fun findOrCreateCompany(companyName: String, cityName: String?): EntityID<Int> {
         val existingId = Companies
             .selectAll()
             .andWhere { Companies.name eq companyName }
-            .map { it[Companies.id] } // Bezpečně vytáhneme ID z celého řádku
+            .map { it[Companies.id] }
             .singleOrNull()
 
         return if (existingId != null) {
@@ -342,18 +342,14 @@ class BoltImportService {
         }
     }
 
-    /**
-     * Najde nebo vytvoří uživatele a přiřadí ho k firmě.
-     */
     private fun findOrCreateUserByEmail(
         email: String,
         nameOrNull: String?,
         contactOrNull: String?,
-        companyId: EntityID<Int> // 🆕 Přidáno companyId
+        companyId: EntityID<Int>
     ): EntityID<Int> {
         val existing = UsersSchema.selectAll().where { UsersSchema.email eq email }.singleOrNull()
         if (existing != null) {
-            // Pokud uživatel existuje, vracíme jeho ID.
             return existing[UsersSchema.id]
         }
 
@@ -366,7 +362,7 @@ class BoltImportService {
             it[UsersSchema.contact] = contactOrNull ?: ""
             it[UsersSchema.role] = "driver"
             it[UsersSchema.passwordHash] = hashed
-            it[UsersSchema.companyId] = companyId // 🆕 Uložíme vazbu na firmu
+            it[UsersSchema.companyId] = companyId
         }
     }
 

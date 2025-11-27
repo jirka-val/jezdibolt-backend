@@ -1,27 +1,111 @@
 package jezdibolt.service
 
 import jezdibolt.api.AdjustmentItemDto
-import jezdibolt.model.BoltEarnings
-import jezdibolt.model.EarningAdjustments
+import jezdibolt.model.*
+import jezdibolt.repository.RentalRecordRepository
+import jezdibolt.repository.UserRepository
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
 
 object EarningsService {
 
+    private val rentalRepo = RentalRecordRepository()
+    private val userRepo = UserRepository()
+
     /**
-     * Uloží seznam položek (bonusů nebo pokut) a přepočítá celkový výdělek.
+     * 🔄 Hlavní metoda pro přepočet výdělků uživatele (např. při změně role).
+     * Přepočítá všechny NEZAPLACENÉ výdělky podle aktuální role.
      */
+    fun recalculateUserEarnings(userId: Int) {
+        transaction {
+            val userRole = userRepo.getRole(userId) ?: return@transaction
+
+            // DSL: Najdeme všechny nezaplacené výdělky
+            BoltEarnings
+                .selectAll()
+                .where { (BoltEarnings.userId eq userId) and (BoltEarnings.paid eq false) }
+                .forEach { row ->
+                    val earningId = row[BoltEarnings.id].value
+                    val grossTotal = row[BoltEarnings.grossTotal]
+
+                    if (userRole == "renter") {
+                        applyRenterLogic(earningId, userId, grossTotal)
+                    } else {
+                        applyDriverLogic(earningId)
+                    }
+
+                    // Nakonec vždy přepočítáme součty (settlement)
+                    recalculateEarnings(earningId)
+                }
+        }
+    }
+
+    /**
+     * 🚕 Logika pro DRIVERA:
+     * - Smaže automatické poplatky za nájem a servis.
+     */
+    private fun applyDriverLogic(earningId: Int) {
+        EarningAdjustments.deleteWhere {
+            (EarningAdjustments.earningId eq earningId) and
+                    (EarningAdjustments.type inList listOf("RENTAL_FEE", "SERVICE_FEE"))
+        }
+    }
+
+    /**
+     * 🔑 Logika pro RENTERA:
+     * - Vypočítá 4% poplatek z hrubého výdělku.
+     * - Najde cenu nájmu pro daného uživatele.
+     * - Vytvoří nebo aktualizuje záznamy v earning_adjustments.
+     */
+    private fun applyRenterLogic(earningId: Int, userId: Int, grossTotal: BigDecimal?) {
+        // 1. Poplatek 4% z Hrubého výdělku
+        val gross = grossTotal ?: BigDecimal.ZERO
+        val serviceFeeAmount = gross.multiply(BigDecimal("0.04")).negate()
+
+        createOrUpdateAdjustment(earningId, "SERVICE_FEE", "Poplatek 4%", serviceFeeAmount)
+
+        // 2. Nájemné
+        val rentalPrice = findRentalPriceForUser(userId)
+
+        if (rentalPrice != null && rentalPrice > BigDecimal.ZERO) {
+            val rentalFeeAmount = rentalPrice.negate()
+            createOrUpdateAdjustment(earningId, "RENTAL_FEE", "Nájem auta", rentalFeeAmount)
+        }
+    }
+
+    private fun createOrUpdateAdjustment(earningId: Int, type: String, category: String, amount: BigDecimal) {
+        // Smažeme starý záznam
+        EarningAdjustments.deleteWhere {
+            (EarningAdjustments.earningId eq earningId) and (EarningAdjustments.type eq type)
+        }
+        // Vložíme nový
+        EarningAdjustments.insert {
+            it[this.earningId] = earningId
+            it[this.type] = type
+            it[this.category] = category
+            it[this.amount] = amount
+            it[this.note] = "Automatický výpočet"
+        }
+    }
+
+    private fun findRentalPriceForUser(userId: Int): BigDecimal? {
+        // Nová logika: Prostě najdi záznam v "ceníku"
+        return RentalRecords
+            .selectAll()
+            .where { RentalRecords.userId eq userId }
+            .map { it[RentalRecords.pricePerWeek] }
+            .singleOrNull()
+    }
+
     fun updateAdjustments(earningId: Int, type: String, items: List<AdjustmentItemDto>) {
         transaction {
-            // 1. Smažeme staré položky tohoto typu pro tento earning (režim "nahradit vše")
-            // Tím vyřešíme i mazání položek, které uživatel odebral na frontendu
             EarningAdjustments.deleteWhere {
                 (EarningAdjustments.earningId eq earningId) and (EarningAdjustments.type eq type)
             }
 
-            // 2. Vložíme nové položky
             EarningAdjustments.batchInsert(items) { item ->
                 this[EarningAdjustments.earningId] = earningId
                 this[EarningAdjustments.type] = type
@@ -30,30 +114,24 @@ object EarningsService {
                 this[EarningAdjustments.note] = item.note
             }
 
-            // 3. PŘEPOČET HLAVNÍ TABULKY
             recalculateEarnings(earningId)
         }
     }
 
-    /**
-     * Vytáhne všechny adjustmenty, sečte je a aktualizuje hlavní záznam BoltEarnings.
-     */
     private fun recalculateEarnings(earningId: Int) {
-        // Načteme všechny adjustmenty pro tento earning
         val adjustments = EarningAdjustments
             .selectAll()
             .where { EarningAdjustments.earningId eq earningId }
             .toList()
 
-        val totalBonus = adjustments
-            .filter { it[EarningAdjustments.type] == "BONUS" }
-            .sumOf { it[EarningAdjustments.amount] }
+        val totalBonus = adjustments.filter { it[EarningAdjustments.type] == "BONUS" }.sumOf { it[EarningAdjustments.amount] }
+        val totalPenalty = adjustments.filter { it[EarningAdjustments.type] == "PENALTY" }.sumOf { it[EarningAdjustments.amount] }
 
-        val totalPenalty = adjustments
-            .filter { it[EarningAdjustments.type] == "PENALTY" }
-            .sumOf { it[EarningAdjustments.amount] }
+        // Renter specifika
+        val totalServiceFee = adjustments.filter { it[EarningAdjustments.type] == "SERVICE_FEE" }.sumOf { it[EarningAdjustments.amount] }
+        val totalRentalFee = adjustments.filter { it[EarningAdjustments.type] == "RENTAL_FEE" }.sumOf { it[EarningAdjustments.amount] }
+        val totalVatDeduction = adjustments.filter { it[EarningAdjustments.type] == "VAT_DEDUCTION" }.sumOf { it[EarningAdjustments.amount] }
 
-        // Načteme aktuální earning řádek pro základní hodnoty
         val earningRow = BoltEarnings
             .selectAll()
             .where { BoltEarnings.id eq earningId }
@@ -61,45 +139,34 @@ object EarningsService {
 
         val baseEarnings = earningRow[BoltEarnings.earnings] ?: BigDecimal.ZERO
         val cashTaken = earningRow[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
+        val partiallyPaid = earningRow[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-        // 🧮 VZOREC: Settlement = (Výdělek - Hotovost) + Bonusy - Pokuty
-        // Pozn: Pokud uživatel už něco zaplatil (partiallyPaid), to se odečte až při platbě,
-        // settlement ukazuje "kolik zbývá doplatit/vyrovnat".
-
-        // Pokud settlement má odrážet "celkový dluh před zaplacením", vzorec je:
-        // (Earnings - Cash) + Bonus - Penalty.
-        // Pokud máš logiku, že settlement se snižuje platbami, musíme být opatrní.
-        // Většinou je lepší držet "TotalDebt" a "PaidAmount" zvlášť.
-        // Ale pro zachování tvé stávající logiky settlementu:
-
+        // 🧮 Settlement
         val newSettlement = baseEarnings
             .subtract(cashTaken)
             .add(totalBonus)
             .subtract(totalPenalty)
-            // Pokud uživatel už něco zaplatil, musíme to zohlednit?
-            // V tvém modelu 'settlement' funguje jako "current balance".
-            // Pokud recalculujeme, vracíme se k "teoretickému dluhu".
-            // Musíme odečíst to, co už bylo zaplaceno (partiallyPaid).
-            .subtract(earningRow[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO)
+            .add(totalServiceFee)
+            .add(totalRentalFee)
+            .add(totalVatDeduction)
+            .subtract(partiallyPaid)
 
-        // Update hlavního záznamu
         BoltEarnings.update({ BoltEarnings.id eq earningId }) {
             it[bonus] = totalBonus
             it[penalty] = totalPenalty
             it[settlement] = newSettlement
 
-            // Pokud se změnou částky dostaneme na 0 (nebo blízko), můžeme označit jako paid?
-            // Raději neautomatizovat 'paid = true' zde, nechat to na ručním potvrzení nebo payment endpointu.
-            // Ale pokud se settlement změní na nenulový, měli bychom asi shodit 'paid' na false.
+            // 🆕 Uložení renter hodnot
+            it[rentalFee] = totalRentalFee
+            it[serviceFee] = totalServiceFee
+            it[vatDeduction] = totalVatDeduction
+
             if (newSettlement.abs() > BigDecimal("0.01")) {
                 it[paid] = false
             }
         }
     }
 
-    /**
-     * Načte položky pro zobrazení v modálu
-     */
     fun getAdjustments(earningId: Int, type: String): List<AdjustmentItemDto> {
         return transaction {
             EarningAdjustments
@@ -109,7 +176,7 @@ object EarningsService {
                     AdjustmentItemDto(
                         id = it[EarningAdjustments.id].value.toString(),
                         category = it[EarningAdjustments.category],
-                        amount = it[EarningAdjustments.amount].toDouble(),
+                        amount = it[EarningAdjustments.amount].abs().toDouble(),
                         note = it[EarningAdjustments.note]
                     )
                 }

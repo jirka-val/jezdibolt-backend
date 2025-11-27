@@ -17,7 +17,8 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
 
-// DTO pro položky v modálu
+// --- DTOs ---
+
 @Serializable
 data class AdjustmentItemDto(
     val id: String? = null,
@@ -26,7 +27,6 @@ data class AdjustmentItemDto(
     val note: String?
 )
 
-// Request body - seznam položek
 @Serializable
 data class AdjustmentRequest(
     val items: List<AdjustmentItemDto>
@@ -35,6 +35,34 @@ data class AdjustmentRequest(
 @Serializable
 data class PayRequest(val amount: String)
 
+// 🟢 AKTUALIZOVANÉ DTO (To, co letí na frontend)
+@Serializable
+data class EarningsDto(
+    val id: Int,
+    val userId: Int,        // 🆕 Nutné pro identifikaci usera při změně ceny
+    val batchId: Int,
+    val userName: String,
+    val email: String,
+    val role: String,       // 🆕 PŘIDÁNO: Role uživatele (driver/renter) pro filtrování
+    val hoursWorked: Double,
+    val grossPerHour: Int,
+    val earnings: String,   // Čistý výdělek (od Boltu)
+    val cashTaken: String,
+    val bonus: String,
+    val penalty: String,
+    val partiallyPaid: String,
+    val settlement: String, // Konečná částka k výplatě
+    val paid: Boolean,
+
+    // 🆕 Nová pole pro Rentery
+    val rentalFee: String,
+    val serviceFee: String,
+    val vatDeduction: String,
+    val grossTotal: String  // Hrubý výdělek
+)
+
+// --- API LOGIKA ---
+
 fun Application.earningsApi(userService: UserService = UserService()) {
     routing {
         route("/earnings") {
@@ -42,155 +70,103 @@ fun Application.earningsApi(userService: UserService = UserService()) {
 
                 get("{id}/adjustments") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
-
                     if (!userService.hasPermission(user.id, "VIEW_EARNINGS")) {
-                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet výplaty"))
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Access denied"))
                     }
-
-                    val id = call.parameters["id"]?.toIntOrNull()
-                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid ID"))
-
-                    val typeParam = call.request.queryParameters["type"]?.uppercase()
-                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing type (bonus/penalty)"))
-
+                    val id = call.parameters["id"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+                    val typeParam = call.request.queryParameters["type"]?.uppercase() ?: return@get call.respond(HttpStatusCode.BadRequest)
                     val type = if (typeParam.contains("BONUS")) "BONUS" else "PENALTY"
 
-                    val items = EarningsService.getAdjustments(id, type)
-                    call.respond(items)
+                    call.respond(EarningsService.getAdjustments(id, type))
                 }
 
                 put("{id}/bonus") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) return@put call.respond(HttpStatusCode.Forbidden)
 
-                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) {
-                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění upravovat bonusy"))
-                    }
-
-                    val id = call.parameters["id"]?.toIntOrNull()
-                        ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
-
+                    val id = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
                     val body = call.receive<AdjustmentRequest>()
 
                     try {
                         EarningsService.updateAdjustments(id, "BONUS", body.items)
-
-                        HistoryService.log(
-                            adminId = user.id,
-                            action = "UPDATE_BONUS_LIST",
-                            entity = "BoltEarnings",
-                            entityId = id,
-                            details = "Uživatel ${user.email} upravil bonusy (${body.items.size} položek)"
-                        )
-
+                        HistoryService.log(user.id, "UPDATE_BONUS", "BoltEarnings", id, "Updated bonuses")
                         WebSocketConnections.broadcast("""{"type":"earning_updated","id":$id}""")
-
                         call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+                        call.respond(HttpStatusCode.InternalServerError)
                     }
                 }
 
                 put("{id}/penalty") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) return@put call.respond(HttpStatusCode.Forbidden)
 
-                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) {
-                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění upravovat pokuty"))
-                    }
-
-                    val id = call.parameters["id"]?.toIntOrNull()
-                        ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid earningId"))
-
+                    val id = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
                     val body = call.receive<AdjustmentRequest>()
 
                     try {
                         EarningsService.updateAdjustments(id, "PENALTY", body.items)
-
-                        HistoryService.log(
-                            adminId = user.id,
-                            action = "UPDATE_PENALTY_LIST",
-                            entity = "BoltEarnings",
-                            entityId = id,
-                            details = "Uživatel ${user.email} upravil pokuty (${body.items.size} položek)"
-                        )
-
+                        HistoryService.log(user.id, "UPDATE_PENALTY", "BoltEarnings", id, "Updated penalties")
                         WebSocketConnections.broadcast("""{"type":"earning_updated","id":$id}""")
-
                         call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+                        call.respond(HttpStatusCode.InternalServerError)
                     }
                 }
 
                 put("{id}/pay") {
                     val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) return@put call.respond(HttpStatusCode.Forbidden)
 
-                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) {
-                        return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění provádět platby"))
-                    }
-
-                    val id = call.parameters["id"]?.toIntOrNull()
-                        ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid id"))
-
+                    val id = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
                     val body = runCatching { call.receiveNullable<PayRequest>() }.getOrNull()
-                    val amount = body?.amount?.toBigDecimalOrNull()
-                        ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing or invalid amount"))
+                    val amount = body?.amount?.toBigDecimalOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
 
                     val result = transaction {
                         val row = BoltEarnings.selectAll().where { BoltEarnings.id eq id }.singleOrNull()
-                            ?: return@transaction mapOf("error" to "Earning not found")
+                            ?: return@transaction mapOf("error" to "Not found")
 
                         val currentSettlement = row[BoltEarnings.settlement] ?: BigDecimal.ZERO
                         val currentPartial = row[BoltEarnings.partiallyPaid] ?: BigDecimal.ZERO
 
-                        val isDriverPaying = currentSettlement < BigDecimal.ZERO
                         val payment = amount.abs()
+                        val isDriverPaying = currentSettlement < BigDecimal.ZERO
 
-                        val newSettlement = if (isDriverPaying) {
-                            currentSettlement + payment
-                        } else {
-                            currentSettlement - payment
-                        }
-
+                        val newSettlement = if (isDriverPaying) currentSettlement + payment else currentSettlement - payment
                         val fullyPaid = newSettlement.abs() < BigDecimal("0.01")
 
                         if (fullyPaid) {
                             BoltEarnings.update({ BoltEarnings.id eq id }) {
-                                it[BoltEarnings.settlement] = BigDecimal.ZERO
-                                it[BoltEarnings.paid] = true
-                                it[BoltEarnings.paidAt] = org.jetbrains.exposed.sql.javatime.CurrentDateTime
-                                it[BoltEarnings.partiallyPaid] = BigDecimal.ZERO // Reset partial
+                                it[settlement] = BigDecimal.ZERO
+                                it[paid] = true
+                                it[paidAt] = org.jetbrains.exposed.sql.javatime.CurrentDateTime
+                                it[partiallyPaid] = BigDecimal.ZERO
                             }
                             mapOf("status" to "fully paid", "amount" to payment.toPlainString())
                         } else {
                             BoltEarnings.update({ BoltEarnings.id eq id }) {
-                                it[BoltEarnings.settlement] = newSettlement
-                                it[BoltEarnings.partiallyPaid] = currentPartial + payment
-                                it[BoltEarnings.paid] = false
+                                it[settlement] = newSettlement
+                                it[partiallyPaid] = currentPartial + payment
+                                it[paid] = false
                             }
-                            mapOf("status" to "partially paid", "amount" to payment.toPlainString(), "newSettlement" to newSettlement.toPlainString())
+                            mapOf("status" to "partially paid", "amount" to payment.toPlainString())
                         }
                     }
 
                     if (result.containsKey("error")) {
                         call.respond(HttpStatusCode.NotFound, result)
                     } else {
-                        val type = if (result["status"] == "fully paid") "earning_fully_paid" else "earning_partially_paid"
-                        WebSocketConnections.broadcast(
-                            """{"type":"$type","id":$id,"amount":"${result["amount"]}"}"""
-                        )
+                        WebSocketConnections.broadcast("""{"type":"earning_updated","id":$id}""")
                         call.respond(HttpStatusCode.OK, result)
                     }
                 }
 
-                // 🔹 Nezaplacené výdělky (filtrované podle práv uživatele)
+                // 🔹 SEZNAM PRO RENTALS PAGE I EARNINGS PAGE
                 get("/unpaid/all") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
-
-                    if (!userService.hasPermission(user.id, "VIEW_EARNINGS")) {
-                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet seznam výplat"))
-                    }
+                    if (!userService.hasPermission(user.id, "VIEW_EARNINGS")) return@get call.respond(HttpStatusCode.Forbidden)
 
                     try {
                         val results = transaction {
@@ -199,72 +175,45 @@ fun Application.earningsApi(userService: UserService = UserService()) {
                                 .selectAll()
                                 .where { (BoltEarnings.paid eq false) or (BoltEarnings.partiallyPaid greater BigDecimal.ZERO) }
 
+                            // Filtrace podle práv (pokud není owner)
                             if (user.role != "owner") {
                                 val allowedCompanies = userService.getAllowedCompanies(user.id)
                                 val allowedCities = userService.getAllowedCities(user.id)
-
                                 query = query.andWhere {
-                                    val conditions = mutableListOf<Op<Boolean>>()
-
-                                    if (allowedCompanies.isNotEmpty()) {
-                                        conditions.add(UsersSchema.companyId inList allowedCompanies)
-                                    }
-
-                                    if (allowedCities.isNotEmpty()) {
-                                        conditions.add(Companies.city inList allowedCities)
-                                    }
-
-                                    if (conditions.isNotEmpty()) {
-                                        conditions.reduce { acc, op -> acc or op }
-                                    } else {
-                                        Op.FALSE
-                                    }
+                                    val c1 = if (allowedCompanies.isNotEmpty()) (UsersSchema.companyId inList allowedCompanies) else Op.FALSE
+                                    val c2 = if (allowedCities.isNotEmpty()) (Companies.city inList allowedCities) else Op.FALSE
+                                    c1 or c2
                                 }
                             }
 
-                            query
-                                .orderBy(BoltEarnings.id, SortOrder.DESC)
+                            query.orderBy(BoltEarnings.id, SortOrder.DESC)
                                 .map { row -> mapRowToEarningsDto(row) }
                         }
                         call.respond(HttpStatusCode.OK, results)
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed"))
+                        call.respond(HttpStatusCode.InternalServerError)
                     }
                 }
 
+                // Endpoint pro konkrétní import
                 get("/imports/{id}") {
                     val user = call.authUser() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+                    if (!userService.hasPermission(user.id, "VIEW_EARNINGS")) return@get call.respond(HttpStatusCode.Forbidden)
 
-                    if (!userService.hasPermission(user.id, "VIEW_EARNINGS")) {
-                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Nemáte oprávnění prohlížet výplaty"))
-                    }
-
-                    val batchIdParam = call.parameters["id"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
-                    val paidFilter = call.request.queryParameters["paid"]
+                    val batchId = call.parameters["id"]?.toIntOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
 
                     try {
                         val results = transaction {
-                            // Také zde bychom mohli aplikovat filtraci, pokud je potřeba,
-                            // ale tento endpoint je obvykle volán z kontextu importu, kde už uživatel import vidí.
-                            // Pro konzistenci je dobré filtrovat i zde, pokud chceme být striktní.
-                            // Prozatím nechávám původní logiku (jen user join),
-                            // případně doplňte stejný JOIN + WHERE blok jako u /unpaid/all.
-
-                            val query = (BoltEarnings innerJoin UsersSchema)
+                            (BoltEarnings innerJoin UsersSchema)
                                 .selectAll()
-                                .where { BoltEarnings.batchId eq batchIdParam }
-
-                            when (paidFilter) {
-                                "false" -> query.andWhere { (BoltEarnings.paid eq false) or (BoltEarnings.partiallyPaid greater BigDecimal.ZERO) }
-                                "true" -> query.andWhere { BoltEarnings.paid eq true }
-                            }
-                            query.map { row -> mapRowToEarningsDto(row) }
+                                .where { BoltEarnings.batchId eq batchId }
+                                .map { row -> mapRowToEarningsDto(row) }
                         }
                         call.respond(HttpStatusCode.OK, results)
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed"))
+                        call.respond(HttpStatusCode.InternalServerError)
                     }
                 }
             }
@@ -272,6 +221,7 @@ fun Application.earningsApi(userService: UserService = UserService()) {
     }
 }
 
+// 🛠 MAPPER (Převádí řádek databáze na DTO pro frontend)
 private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
     val hoursWorked = row[BoltEarnings.hoursWorked] ?: BigDecimal.ZERO
     val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
@@ -282,6 +232,12 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
     val settlement = row[BoltEarnings.settlement] ?: BigDecimal.ZERO
     val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
 
+    // 🆕 Načítáme nová pole z databáze
+    val rentalFee = row[BoltEarnings.rentalFee] ?: BigDecimal.ZERO
+    val serviceFee = row[BoltEarnings.serviceFee] ?: BigDecimal.ZERO
+    val vatDeduction = row[BoltEarnings.vatDeduction] ?: BigDecimal.ZERO
+    val grossTotal = row[BoltEarnings.grossTotal] ?: BigDecimal.ZERO
+
     val appliedRate = PayoutService.getAppliedRate(
         hoursWorked.toDouble(),
         hourlyGross.toDouble()
@@ -289,9 +245,11 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
 
     return EarningsDto(
         id = row[BoltEarnings.id].value,
+        userId = row[BoltEarnings.userId].value, // 🆕 Posíláme User ID
         batchId = row[BoltEarnings.batchId].value,
         userName = row[UsersSchema.name],
         email = row[UsersSchema.email],
+        role = row[UsersSchema.role], // 🆕 PŘIDÁNA ROLE
         hoursWorked = hoursWorked.toDouble(),
         grossPerHour = appliedRate,
         earnings = earnings.toPlainString(),
@@ -300,23 +258,12 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
         penalty = penalty.toPlainString(),
         partiallyPaid = partiallyPaid.toPlainString(),
         settlement = settlement.toPlainString(),
-        paid = row[BoltEarnings.paid]
+        paid = row[BoltEarnings.paid],
+
+        // 🆕 Posíláme nové hodnoty
+        rentalFee = rentalFee.toPlainString(),
+        serviceFee = serviceFee.toPlainString(),
+        vatDeduction = vatDeduction.toPlainString(),
+        grossTotal = grossTotal.toPlainString()
     )
 }
-
-@Serializable
-data class EarningsDto(
-    val id: Int,
-    val batchId: Int,
-    val userName: String,
-    val email: String,
-    val hoursWorked: Double,
-    val grossPerHour: Int,
-    val earnings: String,
-    val cashTaken: String,
-    val bonus: String,
-    val penalty: String,
-    val partiallyPaid: String,
-    val settlement: String,
-    val paid: Boolean
-)

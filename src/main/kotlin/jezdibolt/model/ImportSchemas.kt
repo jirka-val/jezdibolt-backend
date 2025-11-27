@@ -9,8 +9,8 @@ import java.math.BigDecimal
 object ImportBatches : IntIdTable("import_batches") {
     val filename = varchar("filename", 255)
     val isoWeek = varchar("iso_week", 10)
-    val company = varchar("company", 255) // Firma / fleet
-    val city = varchar("city", 100).nullable() // Město (Brno, Praha, Ostrava…)
+    val company = varchar("company", 255)
+    val city = varchar("city", 100).nullable()
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
 }
 
@@ -28,10 +28,10 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
     val hoursWorked = decimal("hours_worked", 10, 2)
     val cashTaken   = decimal("cash_taken_kc",  12, 2).nullable()
 
-    val appliedRate = integer("applied_rate").nullable()          // sazba použitá při importu
+    val appliedRate = integer("applied_rate").nullable()
 
-    val earnings   = decimal("earnings_kc", 12, 2).nullable()     // nárok (hodiny × sazba + tips)
-    val settlement = decimal("settlement_kc", 12, 2).nullable()   // vyrovnání (earnings − hotovost)
+    val earnings   = decimal("earnings_kc", 12, 2).nullable()
+    val settlement = decimal("settlement_kc", 12, 2).nullable()
 
     val partiallyPaid = decimal("partially_paid_kc", 12, 2).default(BigDecimal.ZERO)
 
@@ -41,28 +41,21 @@ object BoltEarnings : IntIdTable("bolt_earnings") {
     val bonus = decimal("bonus_kc", 12, 2).default(BigDecimal.ZERO)
     val penalty = decimal("penalty_kc", 12, 2).default(BigDecimal.ZERO)
 
+    // 🆕 NOVÉ SLOUPCE PRO RENTERY (Cache pro rychlé zobrazení)
+    val rentalFee = decimal("rental_fee_kc", 12, 2).default(BigDecimal.ZERO)
+    val serviceFee = decimal("service_fee_kc", 12, 2).default(BigDecimal.ZERO)
+    val vatDeduction = decimal("vat_deduction_kc", 12, 2).default(BigDecimal.ZERO)
+
     init {
         index(true, uniqueIdentifier, batchId)
     }
 }
 
 object EarningAdjustments : IntIdTable("earning_adjustments") {
-    // Vazba na hlavní výdělek (pokud se smaže výdělek, smažou se i bonusy)
     val earningId = reference("earning_id", BoltEarnings, onDelete = ReferenceOption.CASCADE)
-
-    // Typ: "BONUS" nebo "PENALTY"
     val type = varchar("type", 20)
-
-    // Kategorie: "fuel", "wash", "damage", "other"...
     val category = varchar("category", 50)
-
-    // Částka položky
     val amount = decimal("amount", 12, 2)
-
-    // Volitelná poznámka
     val note = text("note").nullable()
-
-    // Čas vytvoření
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
 }
-
