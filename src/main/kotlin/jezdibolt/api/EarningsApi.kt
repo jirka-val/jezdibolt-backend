@@ -16,6 +16,7 @@ import kotlinx.serialization.Serializable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.math.BigDecimal
+import java.math.RoundingMode
 
 // --- DTOs ---
 
@@ -45,7 +46,8 @@ data class EarningsDto(
     val email: String,
     val role: String,       // 🆕 PŘIDÁNO: Role uživatele (driver/renter) pro filtrování
     val hoursWorked: Double,
-    val grossPerHour: Int,
+    val grossPerHour: Int,  // Naše sazba (podle pravidel)
+    val rawHourlyGross: String, // 🆕 Hrubý výdělek/h dle Boltu
     val earnings: String,   // Čistý výdělek (od Boltu)
     val cashTaken: String,
     val bonus: String,
@@ -58,7 +60,10 @@ data class EarningsDto(
     val rentalFee: String,
     val serviceFee: String,
     val vatDeduction: String,
-    val grossTotal: String  // Hrubý výdělek
+    val grossTotal: String,  // Hrubý výdělek
+
+    // 🆕 Procento paliva
+    val fuelPercent: String // "15.5" (jako string pro FE)
 )
 
 // --- API LOGIKA ---
@@ -223,6 +228,7 @@ fun Application.earningsApi(userService: UserService = UserService()) {
 
 // 🛠 MAPPER (Převádí řádek databáze na DTO pro frontend)
 private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
+    val earningId = row[BoltEarnings.id].value
     val hoursWorked = row[BoltEarnings.hoursWorked] ?: BigDecimal.ZERO
     val hourlyGross = row[BoltEarnings.hourlyGross] ?: BigDecimal.ZERO
     val cashTaken = row[BoltEarnings.cashTaken] ?: BigDecimal.ZERO
@@ -238,20 +244,33 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
     val vatDeduction = row[BoltEarnings.vatDeduction] ?: BigDecimal.ZERO
     val grossTotal = row[BoltEarnings.grossTotal] ?: BigDecimal.ZERO
 
+    // ⛽ Výpočet paliva
+    val fuelAmount = EarningAdjustments
+        .selectAll()
+        .where { (EarningAdjustments.earningId eq earningId) and (EarningAdjustments.category eq "fuel") }
+        .sumOf { it[EarningAdjustments.amount] }
+
+    val fuelPercent = if (grossTotal.compareTo(BigDecimal.ZERO) != 0) {
+        fuelAmount.divide(grossTotal, 4, RoundingMode.HALF_UP).multiply(BigDecimal(100))
+    } else {
+        BigDecimal.ZERO
+    }
+
     val appliedRate = PayoutService.getAppliedRate(
         hoursWorked.toDouble(),
         hourlyGross.toDouble()
     )
 
     return EarningsDto(
-        id = row[BoltEarnings.id].value,
-        userId = row[BoltEarnings.userId].value, // 🆕 Posíláme User ID
+        id = earningId,
+        userId = row[BoltEarnings.userId].value,
         batchId = row[BoltEarnings.batchId].value,
         userName = row[UsersSchema.name],
         email = row[UsersSchema.email],
-        role = row[UsersSchema.role], // 🆕 PŘIDÁNA ROLE
+        role = row[UsersSchema.role],
         hoursWorked = hoursWorked.toDouble(),
-        grossPerHour = appliedRate,
+        grossPerHour = appliedRate, // Naše kalkulovaná sazba
+        rawHourlyGross = hourlyGross.toPlainString(), // 🆕 Bolt sazba
         earnings = earnings.toPlainString(),
         cashTaken = cashTaken.toPlainString(),
         bonus = bonus.toPlainString(),
@@ -260,10 +279,11 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
         settlement = settlement.toPlainString(),
         paid = row[BoltEarnings.paid],
 
-        // 🆕 Posíláme nové hodnoty
         rentalFee = rentalFee.toPlainString(),
         serviceFee = serviceFee.toPlainString(),
         vatDeduction = vatDeduction.toPlainString(),
-        grossTotal = grossTotal.toPlainString()
+        grossTotal = grossTotal.toPlainString(),
+
+        fuelPercent = fuelPercent.setScale(1, RoundingMode.HALF_UP).toPlainString() // 🆕
     )
 }
