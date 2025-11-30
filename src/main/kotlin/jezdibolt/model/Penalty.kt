@@ -7,6 +7,13 @@ import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.datetime
 import java.time.LocalDateTime
 
+enum class PenaltyStatus {
+    PENDING,   // Čeká na platbu (výchozí)
+    PAID,      // Zaplaceno
+    DEFERRED,  // Odloženo
+    CANCELLED  // Odepsáno/Nezaplatí
+}
+
 object Penalties : IntIdTable("penalties") {
     val carId = reference("car_id", Cars, onDelete = ReferenceOption.CASCADE)
     val userId = reference("user_id", UsersSchema).nullable()
@@ -14,9 +21,11 @@ object Penalties : IntIdTable("penalties") {
     val amount = decimal("amount", 10, 2)
     val description = text("description").nullable()
 
+    val status = enumerationByName("status", 20, PenaltyStatus::class).default(PenaltyStatus.PENDING)
+
     val paid = bool("paid").default(false)
     val paidAt = datetime("paid_at").nullable()
-    val resolvedBy = reference("resolved_by", UsersSchema).nullable() // kdo označil jako zaplacené
+    val resolvedBy = reference("resolved_by", UsersSchema).nullable()
 }
 
 @Serializable
@@ -31,6 +40,7 @@ data class PenaltyDTO(
     val userName: String? = null,
 
     val paid: Boolean = false,
+    val status: String = "PENDING",
     val paidAt: String? = null,
     val resolvedBy: Int? = null,
     val resolvedByName: String? = null

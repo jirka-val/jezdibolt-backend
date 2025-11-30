@@ -9,8 +9,12 @@ import io.ktor.server.routing.*
 import jezdibolt.model.PenaltyDTO
 import jezdibolt.service.HistoryService
 import jezdibolt.service.PenaltyService
-import jezdibolt.service.UserService // ✅ Import UserService
+import jezdibolt.service.UserService
 import jezdibolt.util.authUser
+import jezdibolt.model.PenaltyStatus
+
+@kotlinx.serialization.Serializable
+data class PenaltyStatusRequest(val status: String)
 
 fun Application.penaltyApi(penaltyService: PenaltyService = PenaltyService(), userService: UserService = UserService()) {
     routing {
@@ -59,6 +63,36 @@ fun Application.penaltyApi(penaltyService: PenaltyService = PenaltyService(), us
 
                     call.application.log.info("🚨 ${user.email} vytvořil pokutu #${created.id}")
                     call.respond(HttpStatusCode.Created, created)
+                }
+
+                put("{id}/status") {
+                    val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+                    if (!userService.hasPermission(user.id, "EDIT_PENALTIES")) return@put call.respond(HttpStatusCode.Forbidden)
+
+                    val id = call.parameters["id"]?.toIntOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
+                    val body = call.receive<PenaltyStatusRequest>()
+
+                    val newStatus = try {
+                        PenaltyStatus.valueOf(body.status)
+                    } catch (e: Exception) {
+                        return@put call.respond(HttpStatusCode.BadRequest, "Invalid status")
+                    }
+
+                    val success = penaltyService.updateStatus(id, newStatus, user.id) // Musíš přidat updateStatus do service
+
+                    if (success) {
+                        HistoryService.log(
+                            adminId = user.id,
+                            action = "UPDATE_PENALTY_STATUS",
+                            entity = "Penalty",
+                            entityId = id,
+                            details = "Stav pokuty změněn na ${newStatus.name}"
+                        )
+                        WebSocketConnections.broadcast("""{"type":"penalty_updated","id":$id}""")
+                        call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
+                    } else {
+                        call.respond(HttpStatusCode.NotFound)
+                    }
                 }
 
                 patch("{id}/pay") {

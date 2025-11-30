@@ -16,24 +16,30 @@ class PenaltyRepository {
             .selectAll()
 
         if (paidFilter != null) {
-            query = query.andWhere { Penalties.paid eq paidFilter }
+            if (paidFilter == true) {
+                query = query.andWhere { Penalties.status eq PenaltyStatus.PAID }
+            } else {
+                query = query.andWhere { Penalties.status eq PenaltyStatus.PENDING }
+            }
         }
 
-        query.map {
-            PenaltyDTO(
-                id = it[Penalties.id].value,
-                carId = it[Penalties.carId].value,
-                userId = it[Penalties.userId]?.value,
-                date = it[Penalties.date].toString(),
-                amount = it[Penalties.amount].toDouble(),
-                description = it[Penalties.description],
-                carName = "${it[Cars.brand]} ${it[Cars.model]} (${it[Cars.licensePlate]})",
-                userName = it[UsersSchema.name],
-                paid = it[Penalties.paid],
-                paidAt = it[Penalties.paidAt]?.toString(),
-                resolvedBy = it[Penalties.resolvedBy]?.value
-            )
-        }
+        query.orderBy(Penalties.date, SortOrder.DESC)
+            .map {
+                PenaltyDTO(
+                    id = it[Penalties.id].value,
+                    carId = it[Penalties.carId].value,
+                    userId = it[Penalties.userId]?.value,
+                    date = it[Penalties.date].toString(),
+                    amount = it[Penalties.amount].toDouble(),
+                    description = it[Penalties.description],
+                    carName = "${it[Cars.brand]} ${it[Cars.model]} (${it[Cars.licensePlate]})",
+                    userName = it[UsersSchema.name],
+                    paid = it[Penalties.status] == PenaltyStatus.PAID,
+                    status = it[Penalties.status].name,
+                    paidAt = it[Penalties.paidAt]?.toString(),
+                    resolvedBy = it[Penalties.resolvedBy]?.value
+                )
+            }
     }
 
     fun create(penalty: PenaltyDTO): PenaltyDTO = transaction {
@@ -43,20 +49,31 @@ class PenaltyRepository {
             it[date] = LocalDate.parse(penalty.date)
             it[amount] = penalty.amount.toBigDecimal()
             it[description] = penalty.description
-            it[paid] = penalty.paid
-            it[paidAt] = penalty.paidAt?.let { t -> LocalDateTime.parse(t) }
-            it[resolvedBy] = penalty.resolvedBy?.let { id -> EntityID(id, UsersSchema) }
+            it[status] = PenaltyStatus.PENDING // Default
+            it[paid] = false
         }.value
 
-        penalty.copy(id = newId)
+        penalty.copy(id = newId, status = "PENDING")
     }
 
-    fun markAsPaid(id: Int, resolverId: Int?): Boolean = transaction {
+    fun updateStatus(id: Int, newStatus: PenaltyStatus, resolverId: Int?): Boolean = transaction {
         val updated = Penalties.update({ Penalties.id eq id }) {
-            it[paid] = true
-            it[paidAt] = LocalDateTime.now()
-            if (resolverId != null) it[resolvedBy] = EntityID(resolverId, UsersSchema)
+            it[status] = newStatus
+
+            if (newStatus == PenaltyStatus.PAID) {
+                it[paid] = true
+                it[paidAt] = LocalDateTime.now()
+                if (resolverId != null) it[resolvedBy] = EntityID(resolverId, UsersSchema)
+            } else {
+                it[paid] = false
+                it[paidAt] = null
+                it[resolvedBy] = null
+            }
         }
         updated > 0
+    }
+
+    fun markAsPaid(id: Int, resolverId: Int?): Boolean {
+        return updateStatus(id, PenaltyStatus.PAID, resolverId)
     }
 }

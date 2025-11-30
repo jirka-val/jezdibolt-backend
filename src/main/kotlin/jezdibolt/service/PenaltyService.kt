@@ -1,6 +1,7 @@
 package jezdibolt.service
 
 import jezdibolt.model.PenaltyDTO
+import jezdibolt.model.PenaltyStatus
 import jezdibolt.repository.PenaltyRepository
 
 class PenaltyService(
@@ -14,4 +15,7 @@ class PenaltyService(
 
     fun markAsPaid(id: Int, resolverId: Int?): Boolean =
         penaltyRepository.markAsPaid(id, resolverId)
+
+    fun updateStatus(id: Int, status: PenaltyStatus, resolverId: Int?): Boolean =
+        penaltyRepository.updateStatus(id, status, resolverId)
 }
