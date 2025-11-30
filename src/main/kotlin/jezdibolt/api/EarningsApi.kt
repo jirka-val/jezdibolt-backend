@@ -34,6 +34,9 @@ data class AdjustmentRequest(
 )
 
 @Serializable
+data class RateRequest(val rate: Int)
+
+@Serializable
 data class PayRequest(val amount: String)
 
 // 🟢 AKTUALIZOVANÉ DTO (To, co letí na frontend)
@@ -113,6 +116,37 @@ fun Application.earningsApi(userService: UserService = UserService()) {
                     try {
                         EarningsService.updateAdjustments(id, "PENALTY", body.items)
                         HistoryService.log(user.id, "UPDATE_PENALTY", "BoltEarnings", id, "Updated penalties")
+                        WebSocketConnections.broadcast("""{"type":"earning_updated","id":$id}""")
+                        call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        call.respond(HttpStatusCode.InternalServerError)
+                    }
+                }
+
+                put("{id}/rate") {
+                    val user = call.authUser() ?: return@put call.respond(HttpStatusCode.Unauthorized)
+
+                    if (!userService.hasPermission(user.id, "EDIT_EARNINGS")) {
+                        return@put call.respond(HttpStatusCode.Forbidden)
+                    }
+
+                    val id = call.parameters["id"]?.toIntOrNull()
+                        ?: return@put call.respond(HttpStatusCode.BadRequest)
+
+                    val body = call.receive<RateRequest>()
+
+                    try {
+                        EarningsService.updateRate(id, body.rate)
+
+                        HistoryService.log(
+                            user.id,
+                            "UPDATE_RATE",
+                            "BoltEarnings",
+                            id,
+                            "Manual rate update to ${body.rate} Kč/h"
+                        )
+
                         WebSocketConnections.broadcast("""{"type":"earning_updated","id":$id}""")
                         call.respond(HttpStatusCode.OK, mapOf("status" to "updated"))
                     } catch (e: Exception) {
@@ -226,7 +260,6 @@ fun Application.earningsApi(userService: UserService = UserService()) {
     }
 }
 
-// 🛠 MAPPER (Převádí řádek databáze na DTO pro frontend)
 private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
     val earningId = row[BoltEarnings.id].value
     val hoursWorked = row[BoltEarnings.hoursWorked] ?: BigDecimal.ZERO
@@ -238,13 +271,11 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
     val settlement = row[BoltEarnings.settlement] ?: BigDecimal.ZERO
     val earnings = row[BoltEarnings.earnings] ?: BigDecimal.ZERO
 
-    // 🆕 Načítáme nová pole z databáze
     val rentalFee = row[BoltEarnings.rentalFee] ?: BigDecimal.ZERO
     val serviceFee = row[BoltEarnings.serviceFee] ?: BigDecimal.ZERO
     val vatDeduction = row[BoltEarnings.vatDeduction] ?: BigDecimal.ZERO
     val grossTotal = row[BoltEarnings.grossTotal] ?: BigDecimal.ZERO
 
-    // ⛽ Výpočet paliva
     val fuelAmount = EarningAdjustments
         .selectAll()
         .where { (EarningAdjustments.earningId eq earningId) and (EarningAdjustments.category eq "fuel") }
@@ -256,10 +287,8 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
         BigDecimal.ZERO
     }
 
-    val appliedRate = PayoutService.getAppliedRate(
-        hoursWorked.toDouble(),
-        hourlyGross.toDouble()
-    )
+    val appliedRate = row[BoltEarnings.appliedRate]
+        ?: PayoutService.getAppliedRate(hoursWorked.toDouble(), hourlyGross.toDouble())
 
     return EarningsDto(
         id = earningId,
@@ -269,8 +298,8 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
         email = row[UsersSchema.email],
         role = row[UsersSchema.role],
         hoursWorked = hoursWorked.toDouble(),
-        grossPerHour = appliedRate, // Naše kalkulovaná sazba
-        rawHourlyGross = hourlyGross.toPlainString(), // 🆕 Bolt sazba
+        grossPerHour = appliedRate,
+        rawHourlyGross = hourlyGross.toPlainString(),
         earnings = earnings.toPlainString(),
         cashTaken = cashTaken.toPlainString(),
         bonus = bonus.toPlainString(),
@@ -284,6 +313,6 @@ private fun mapRowToEarningsDto(row: ResultRow): EarningsDto {
         vatDeduction = vatDeduction.toPlainString(),
         grossTotal = grossTotal.toPlainString(),
 
-        fuelPercent = fuelPercent.setScale(1, RoundingMode.HALF_UP).toPlainString() // 🆕
+        fuelPercent = fuelPercent.setScale(1, RoundingMode.HALF_UP).toPlainString()
     )
 }

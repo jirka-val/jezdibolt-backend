@@ -91,6 +91,24 @@ object EarningsService {
         }
     }
 
+    fun updateRate(earningId: Int, newRate: Int) {
+        transaction {
+            val row = BoltEarnings.selectAll().where { BoltEarnings.id eq earningId }.single()
+
+            val hoursWorked = row[BoltEarnings.hoursWorked] ?: BigDecimal.ZERO
+            val tips = row[BoltEarnings.tips] ?: BigDecimal.ZERO
+
+            val newEarnings = (hoursWorked.multiply(BigDecimal(newRate))) + tips
+
+            BoltEarnings.update({ BoltEarnings.id eq earningId }) {
+                it[appliedRate] = newRate
+                it[earnings] = newEarnings
+            }
+
+            recalculateEarnings(earningId)
+        }
+    }
+
     private fun findRentalPriceForUser(userId: Int): BigDecimal? {
         // Nová logika: Prostě najdi záznam v "ceníku"
         return RentalRecords
